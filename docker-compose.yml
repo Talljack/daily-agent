@@ -1,0 +1,40 @@
+version: '3.8'
+
+services:
+  daily-agent-web:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    ports:
+      - "3000:3000"
+    environment:
+      - NODE_ENV=production
+      - PORT=3000
+    env_file:
+      - .env.local
+    volumes:
+      - ./logs:/app/logs
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:3000/api/daily"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  daily-agent-cron:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    command: ["tsx", "scripts/cron.ts"]
+    environment:
+      - NODE_ENV=production
+    env_file:
+      - .env.local
+    volumes:
+      - ./logs:/app/logs
+    restart: unless-stopped
+    depends_on:
+      - daily-agent-web
+
+volumes:
+  logs:
