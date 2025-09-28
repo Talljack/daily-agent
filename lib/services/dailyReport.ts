@@ -26,7 +26,8 @@ export type DailyReport = {
 
 async function loadSourceItems(sourceUrl: string, limit?: number): Promise<RSSItem[]> {
   try {
-    return await fetchRSS(sourceUrl, limit);
+    const { items } = await fetchRSS(sourceUrl, limit, { cacheTtlMs: 10 * 60 * 1000, retries: 2 });
+    return items;
   } catch (error) {
     const message = error instanceof Error ? error.message : "未知错误";
     throw new Error(`拉取 ${sourceUrl} 失败: ${message}`);
