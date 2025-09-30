@@ -1,6 +1,7 @@
 import { generateSummary } from "@/lib/agent/dailyAgent";
-import { RSS_SOURCES, DEFAULT_ITEMS_PER_SOURCE } from "@/lib/config/sources";
+import { RSS_SOURCES, DEFAULT_ITEMS_PER_SOURCE, type RssSource } from "@/lib/config/sources";
 import { fetchRSS, RSSItem } from "@/lib/tools/rssTool";
+import { fetchDynamicCategoryInsights } from "@/lib/services/discoveryAggregator";
 import { hasAIConfig } from "@/lib/env";
 
 export type DailySourceItem = {
@@ -15,6 +16,7 @@ export type DailySourceResult = {
   description?: string;
   items: DailySourceItem[];
   error?: string;
+  mode?: "dynamic" | "rss";
 };
 
 export type DailyReport = {
@@ -24,13 +26,78 @@ export type DailyReport = {
   sources: DailySourceResult[];
 };
 
-async function loadSourceItems(sourceUrl: string, limit?: number): Promise<RSSItem[]> {
+async function loadRssItems(sourceUrl: string, limit?: number): Promise<RSSItem[]> {
   try {
-    return await fetchRSS(sourceUrl, limit);
+    const { items } = await fetchRSS(sourceUrl, limit, { cacheTtlMs: 10 * 60 * 1000, retries: 2 });
+    return items;
   } catch (error) {
     const message = error instanceof Error ? error.message : "未知错误";
     throw new Error(`拉取 ${sourceUrl} 失败: ${message}`);
   }
+}
+
+async function loadDailySourceItems(source: RssSource, limit: number) {
+  let lastError: Error | null = null;
+
+  if (source.dynamicSites && source.dynamicSites.length > 0) {
+    try {
+      const dynamicResult = await fetchDynamicCategoryInsights({
+        categoryName: source.title,
+        userPrompt: source.dynamicPrompt ?? source.title,
+        limit,
+        relatedSites: source.dynamicSites,
+      });
+
+      const mapped = dynamicResult.items.slice(0, limit).map((item, index) => ({
+        title: item.title || `${source.title} 热点 ${index + 1}`,
+        link: item.link || "#",
+        summary: item.summary || item.reason || item.title || "",
+      }));
+
+      if (mapped.length > 0) {
+        return { items: mapped, mode: "dynamic" as const };
+      }
+
+      lastError = new Error(`${source.title} 动态聚合返回空结果`);
+      console.warn(`[DailyReport] ${lastError.message}，尝试回退到 RSS 源`);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      lastError = new Error(`${source.title} 动态聚合失败: ${message}`);
+      console.warn(`[DailyReport] ${lastError.message}，尝试回退到 RSS 源`);
+    }
+  }
+
+  if (!source.url) {
+    if (lastError) throw lastError;
+    throw new Error(`${source.title} 未配置 RSS 地址`);
+  }
+
+  try {
+    const rssItems = await loadRssItems(source.url, limit);
+    const mapped = rssItems.map((item) => ({
+      title: item.title,
+      link: item.link,
+      summary: item.content,
+    }));
+    return { items: mapped, mode: "rss" as const };
+  } catch (error) {
+    if (lastError) {
+      throw new Error(`${lastError.message}; RSS 同样失败: ${error instanceof Error ? error.message : String(error)}`);
+    }
+    throw error;
+  }
+}
+
+export async function collectDailySource(source: RssSource): Promise<DailySourceResult> {
+  const limit = source.limit ?? DEFAULT_ITEMS_PER_SOURCE;
+  const { items, mode } = await loadDailySourceItems(source, limit);
+  return {
+    id: source.id,
+    title: source.title,
+    description: source.description,
+    items,
+    mode,
+  } satisfies DailySourceResult;
 }
 
 export async function buildDailyReport(): Promise<DailyReport> {
@@ -40,18 +107,11 @@ export async function buildDailyReport(): Promise<DailyReport> {
     RSS_SOURCES.map(async source => {
       try {
         console.log(`📡 正在拉取 ${source.title} 数据...`);
-        const items = await loadSourceItems(source.url, source.limit ?? DEFAULT_ITEMS_PER_SOURCE);
-        const mapped: DailySourceItem[] = items.map(item => ({
-          title: item.title,
-          link: item.link,
-          summary: item.content,
-        }));
-        console.log(`✅ ${source.title}: 获取到 ${mapped.length} 条数据`);
+        const result = await collectDailySource(source);
+        const modeHint = result.mode === "dynamic" ? "（动态聚合）" : "";
+        console.log(`✅ ${source.title}: 获取到 ${result.items.length} 条数据${modeHint}`);
         return {
-          id: source.id,
-          title: source.title,
-          description: source.description,
-          items: mapped,
+          ...result,
         } satisfies DailySourceResult;
       } catch (error) {
         const message = error instanceof Error ? error.message : "未知错误";

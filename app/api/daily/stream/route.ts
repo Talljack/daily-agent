@@ -1,24 +1,11 @@
 import { NextRequest } from "next/server";
 import { generateSummaryStream } from "@/lib/agent/dailyAgent";
 import { RSS_SOURCES, DEFAULT_ITEMS_PER_SOURCE } from "@/lib/config/sources";
-import { fetchRSS } from "@/lib/tools/rssTool";
-import type { DailySourceResult, DailySourceItem } from "@/lib/services/dailyReport";
+import { hasAIConfig } from "@/lib/env";
+import type { DailySourceResult } from "@/lib/services/dailyReport";
+import { collectDailySource } from "@/lib/services/dailyReport";
 
 export const runtime = 'nodejs';
-
-async function loadSourceItems(sourceUrl: string, limit?: number) {
-  try {
-    const items = await fetchRSS(sourceUrl, limit);
-    return items.map(item => ({
-      title: item.title,
-      link: item.link,
-      summary: item.content,
-    }));
-  } catch (error) {
-    const message = error instanceof Error ? error.message : "未知错误";
-    throw new Error(`拉取 ${sourceUrl} 失败: ${message}`);
-  }
-}
 
 export async function GET(request: NextRequest) {
   const encoder = new TextEncoder();
@@ -43,7 +30,8 @@ export async function GET(request: NextRequest) {
             })}\n\n`));
 
             try {
-              const items = await loadSourceItems(source.url, source.limit ?? DEFAULT_ITEMS_PER_SOURCE);
+              const result = await collectDailySource(source);
+              const items = result.items;
 
               controller.enqueue(encoder.encode(`data: ${JSON.stringify({
                 type: 'source_complete',
@@ -52,15 +40,13 @@ export async function GET(request: NextRequest) {
                   title: source.title,
                   description: source.description,
                   items,
-                  itemCount: items.length
+                  itemCount: items.length,
+                  mode: result.mode
                 }
               })}\n\n`));
 
               return {
-                id: source.id,
-                title: source.title,
-                description: source.description,
-                items,
+                ...result,
               } satisfies DailySourceResult;
             } catch (error) {
               const message = error instanceof Error ? error.message : "未知错误";
@@ -119,10 +105,10 @@ export async function GET(request: NextRequest) {
             content: '暂无可用资讯',
             complete: true
           })}\n\n`));
-        } else if (!process.env.OPENAI_API_KEY) {
+        } else if (!hasAIConfig()) {
           controller.enqueue(encoder.encode(`data: ${JSON.stringify({
             type: 'summary',
-            content: '未配置 OpenAI API 密钥，无法生成智能摘要。\n\n请在 .env.local 中配置 OPENAI_API_KEY。',
+            content: '未配置 AI API 密钥，无法生成智能摘要。\n\n请在 .env.local 中配置 OPENROUTER_API_KEY 或 OPENAI_API_KEY。',
             complete: true
           })}\n\n`));
         } else {

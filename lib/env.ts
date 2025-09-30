@@ -4,7 +4,7 @@ const envSchema = z.object({
   // OpenRouter API Configuration
   OPENROUTER_API_KEY: z
     .string()
-    .startsWith('sk-or-v1-', 'OPENROUTER_API_KEY must start with sk-or-v1-')
+    .startsWith('sk-', 'OPENROUTER_API_KEY must start with sk-or-v1-')
     .optional(),
 
   OPENROUTER_MODEL: z
@@ -16,6 +16,15 @@ const envSchema = z.object({
   OPENAI_API_KEY: z
     .string()
     .startsWith('sk-', 'OPENAI_API_KEY must start with sk-')
+    .optional(),
+
+  SERPAPI_API_KEY: z.string().min(1).optional(),
+
+  GITHUB_TOKEN: z.string().min(1).optional(),
+
+  PRODUCTHUNT_API_TOKEN: z
+    .string()
+    .min(1, 'PRODUCTHUNT_API_TOKEN is required for Product Hunt API')
     .optional(),
 
   // Email Configuration (optional)
@@ -69,6 +78,9 @@ export const {
   OPENROUTER_API_KEY,
   OPENROUTER_MODEL,
   OPENAI_API_KEY,
+  SERPAPI_API_KEY,
+  GITHUB_TOKEN,
+  PRODUCTHUNT_API_TOKEN,
   SMTP_HOST,
   SMTP_PORT,
   SMTP_USER,
@@ -87,9 +99,7 @@ export const hasEmailConfig = () => {
   return Boolean(SMTP_HOST && SMTP_PORT && SMTP_USER && SMTP_PASS && EMAIL_FROM && EMAIL_TO);
 };
 
-export const hasAIConfig = () => {
-  return Boolean(OPENROUTER_API_KEY || OPENAI_API_KEY);
-};
+export const hasAIConfig = () => Boolean(OPENROUTER_API_KEY || OPENAI_API_KEY);
 
 // Export types
 export type Env = z.infer<typeof envSchema>;

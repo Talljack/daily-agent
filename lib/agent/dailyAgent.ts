@@ -1,11 +1,15 @@
 import { ChatOpenAI } from "@langchain/openai";
 import { PromptTemplate } from "@langchain/core/prompts";
+import { OPENROUTER_API_KEY, OPENROUTER_MODEL } from '@/lib/env';
 
-// Configure the model with OpenAI (fallback from OpenRouter)
+// Configure the model with OpenRouter (using Grok)
 export const model = new ChatOpenAI({
-  modelName: "gpt-3.5-turbo",
+  apiKey: OPENROUTER_API_KEY,
+  model: OPENROUTER_MODEL || 'x-ai/grok-4-fast:free',
   temperature: 0.3,
-  openAIApiKey: process.env.OPENAI_API_KEY,
+  configuration: {
+    baseURL: "https://openrouter.ai/api/v1",
+  },
 });
 
 const template = `你是一个专业的科技资讯分析师，负责从多个信息源中提取关键信息并生成结构化的日报摘要。
