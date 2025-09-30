@@ -73,8 +73,16 @@ const sourceHealth = new Map<string, SourceHealth>();
 const RSS_FETCH_OPTIONS = { cacheTtlMs: 10 * 60 * 1000, retries: 2, timeoutMs: 12000 } as const;
 const RECENT_HISTORY_TTL = 48 * 60 * 60 * 1000; // 48 hours
 const recentHistory = new Map<string, number>();
-const SEARCH_CACHE_TTL = 24 * 60 * 60 * 1000; // 24 hours
+const SEARCH_CACHE_TTL = 60 * 60 * 1000; // 1 hour
 const searchCache = new Map<string, { timestamp: number; items: RawSourceItem[] }>();
+
+function toSlug(value: string) {
+  return value
+    .toLowerCase()
+    .trim()
+    .replace(/\s+/g, "-")
+    .replace(/[^a-z0-9-]/g, "");
+}
 
 async function fetchViaJina(targetUrl: string): Promise<string> {
   const proxiedUrl = `https://r.jina.ai/${encodeURI(targetUrl)}`;
@@ -107,12 +115,13 @@ function parseJinaMarkdown(markdown: string, source: DiscoverySourceConfig, limi
     sourceHost = null;
   }
 
-  const regex = /\[(?!\!)([^\]]+?)\]\((https?:\/\/[^\s)]+)\)/g;
+  const sanitizedMarkdown = markdown.replace(/!\[[^\]]*\]\([^)]*\)/g, "");
+  const regex = /\[([^\]]+?)\]\((https?:\/\/[^\s)]+)\)/g;
   const items: RawSourceItem[] = [];
   const seen = new Set<string>();
   let match: RegExpExecArray | null;
 
-  while ((match = regex.exec(markdown)) !== null && items.length < limit) {
+  while ((match = regex.exec(sanitizedMarkdown)) !== null && items.length < limit) {
     const rawText = match[1]?.replace(/\s+/g, " ").trim();
     const link = match[2];
 
@@ -143,7 +152,10 @@ function parseJinaMarkdown(markdown: string, source: DiscoverySourceConfig, limi
 
     seen.add(link);
 
-    const cleanedTitle = rawText.replace(/^\#\#\#\s*/g, "").trim();
+    const cleanedTitle = rawText
+      .replace(/^#+\s*/g, "")
+      .replace(/\s*###\s*/g, " ")
+      .trim();
     if (!cleanedTitle || !cleanedTitle.includes(" ")) continue;
 
     items.push({
@@ -358,7 +370,13 @@ async function fetchSerpApiResults(source: DiscoverySourceConfig, limit: number)
     params.set("hl", source.options.hl);
   }
 
-  const cacheKey = JSON.stringify({ id: source.id, query, engine, gl: source.options?.gl, hl: source.options?.hl, num });
+  const tbs = typeof source.options?.tbs === "string" ? source.options.tbs : undefined;
+
+  if (tbs) {
+    params.set("tbs", tbs);
+  }
+
+  const cacheKey = JSON.stringify({ id: source.id, query, engine, gl: source.options?.gl, hl: source.options?.hl, num, tbs });
   const cached = searchCache.get(cacheKey);
   const now = Date.now();
   const cacheTtl = typeof source.options?.cacheTtlMs === "number" && source.options.cacheTtlMs > 0
@@ -482,6 +500,192 @@ function clampLimit(value: number | undefined, fallback = 6) {
 
 function sortSourcesByWeight(sources: DiscoverySourceConfig[]) {
   return [...sources].sort((a, b) => (b.weight ?? 0.5) - (a.weight ?? 0.5));
+}
+
+function resolveSourcePool(sources: DiscoverySourceConfig[], fallbackSize = 8) {
+  const available = sources.filter((source) => !source.disabled);
+  if (available.length > 0) {
+    return sortSourcesByWeight(available).slice(0, fallbackSize);
+  }
+
+  return sortSourcesByWeight(
+    DISCOVERY_SOURCES.filter((source) => !source.disabled)
+  ).slice(0, fallbackSize);
+}
+
+type CollectionContext = {
+  categoryId: string;
+  categoryName: string;
+  userPrompt: string;
+  limit: number;
+  sources: DiscoverySourceConfig[];
+  categoryDefinition?: DiscoveryCategoryDefinition;
+};
+
+async function collectCategoryInsights(context: CollectionContext): Promise<DiscoveryResult> {
+  const {
+    categoryId,
+    categoryName,
+    userPrompt,
+    limit,
+    sources,
+    categoryDefinition,
+  } = context;
+
+  const resolvedSources = resolveSourcePool(sources);
+  const perSourceLimit = Math.max(4, limit);
+
+  const outcomes = await Promise.allSettled(
+    resolvedSources.map(async (source) => fetchSourceItems(source, perSourceLimit))
+  );
+
+  const rawItems: RawSourceItem[] = [];
+  const sourceStatuses: SourceStatus[] = [];
+
+  outcomes.forEach((result, index) => {
+    const source = resolvedSources[index];
+    if (!source) return;
+
+    if (result.status === "fulfilled") {
+      const outcome = result.value;
+      rawItems.push(...outcome.items);
+
+      const health = sourceHealth.get(source.id);
+      sourceStatuses.push({
+        id: source.id,
+        title: source.title,
+        status: outcome.status,
+        usedFallback: outcome.usedFallback,
+        fromCache: outcome.fromCache,
+        lastSuccessAt: health?.lastSuccessAt ? new Date(health.lastSuccessAt).toISOString() : undefined,
+        lastFailureAt: health?.lastFailureAt ? new Date(health.lastFailureAt).toISOString() : undefined,
+        message: outcome.message,
+      });
+    } else {
+      const reason = result.reason instanceof Error ? result.reason.message : String(result.reason ?? "Unexpected error");
+      recordSourceFailure(source, reason);
+      const health = sourceHealth.get(source.id);
+      sourceStatuses.push({
+        id: source.id,
+        title: source.title,
+        status: "error",
+        usedFallback: false,
+        fromCache: false,
+        lastSuccessAt: health?.lastSuccessAt ? new Date(health.lastSuccessAt).toISOString() : undefined,
+        lastFailureAt: health?.lastFailureAt ? new Date(health.lastFailureAt).toISOString() : undefined,
+        message: reason,
+      });
+    }
+  });
+
+  const deduped = dedupeItems(rawItems);
+  const now = Date.now();
+  const freshCandidates = filterRecentRawItems(deduped, now);
+  const candidatePool = freshCandidates.length > 0
+    ? freshCandidates
+    : deduped.map((item) => ({
+        ...item,
+        reason: item.reason ? `${item.reason} · 近期内容` : "近期内容",
+      }));
+
+  if (candidatePool.length === 0) {
+    const fallbackRaw = resolvedSources
+      .flatMap((source) => source.fallbackItems ?? [])
+      .map((item) => ({
+        title: item.title,
+        summary: item.summary,
+        link: item.link,
+        sourceId: resolvedSources[0]?.id ?? categoryId,
+        sourceName: resolvedSources[0]?.title ?? categoryName,
+        language: resolvedSources[0]?.language ?? "en",
+        reason: "使用预设内容（无可用源）",
+        usedFallback: true,
+      } as RawSourceItem));
+
+    const fallbackItems = buildFallbackHighlights({
+      categoryId,
+      categoryName,
+      rawItems: fallbackRaw,
+      limit,
+    });
+
+    markItemsAsSeen(fallbackItems, now);
+
+    return {
+      id: categoryId,
+      title: categoryName,
+      description:
+        categoryDefinition?.description ?? `AI curated stories for ${categoryName}`,
+      items: fallbackItems,
+      retrievedAt: new Date().toISOString(),
+      meta: {
+        fetchedSourceCount: sourceStatuses.length,
+        rawItemCount: 0,
+        usedAI: false,
+        sourceStatuses,
+      },
+    };
+  }
+
+  const sliceForAI = rebalanceBySource(candidatePool, resolvedSources.map((source) => source.id), limit * 3);
+
+  if (categoryId === "github" || categoryId === "producthunt") {
+    const directItems = buildFallbackHighlights({
+      categoryId,
+      categoryName,
+      rawItems: sliceForAI,
+      limit,
+    });
+
+    markItemsAsSeen(directItems, now);
+
+    return {
+      id: categoryId,
+      title: categoryName,
+      description: categoryDefinition?.description ?? `Direct API results for ${categoryName}`,
+      items: directItems,
+      retrievedAt: new Date().toISOString(),
+      meta: {
+        fetchedSourceCount: resolvedSources.length,
+        rawItemCount: candidatePool.length,
+        usedAI: false,
+        sourceStatuses,
+      },
+    };
+  }
+
+  const aiHighlights = await generateHighlightsWithAI({
+    category: categoryDefinition,
+    categoryId,
+    categoryName,
+    userPrompt,
+    limit,
+    rawItems: sliceForAI,
+  });
+
+  const items = aiHighlights ?? buildFallbackHighlights({
+    categoryId,
+    categoryName,
+    rawItems: sliceForAI,
+    limit,
+  });
+
+  markItemsAsSeen(items, now);
+
+  return {
+    id: categoryId,
+    title: categoryName,
+    description:
+      categoryDefinition?.description ?? `AI curated stories for ${categoryName}`,
+    items,
+    retrievedAt: new Date().toISOString(),
+    meta: {
+      fetchedSourceCount: resolvedSources.length,
+      rawItemCount: candidatePool.length,
+      usedAI: Boolean(aiHighlights),
+      sourceStatuses,
+    },
+  };
 }
 
 function recordSourceSuccess(source: DiscoverySourceConfig) {
@@ -775,24 +979,44 @@ async function generateHighlightsWithAI(options: {
   });
 
   try {
-    const response = await fetch(OPENROUTER_ENDPOINT, {
-      method: "POST",
-      headers: {
-        Authorization: `Bearer ${OPENROUTER_API_KEY}`,
-        "Content-Type": "application/json",
-        "HTTP-Referer": "https://daily-agent.local",
-        "X-Title": "Daily Agent Discovery",
-      },
-      body: JSON.stringify({
-        model: OPENROUTER_MODEL ?? "anthropic/claude-3.5-sonnet",
-        messages: [
-          { role: "system", content: systemPrompt },
-          { role: "user", content: userMessage },
-        ],
-        max_tokens: 2000,
-        temperature: 0.5,
-      }),
-    });
+    const fetchWithRetry = async (retryCount = 0): Promise<Response> => {
+      try {
+        const controller = new AbortController();
+        const timeoutId = setTimeout(() => controller.abort(), 30000); // 30 second timeout for AI
+
+        const response = await fetch(OPENROUTER_ENDPOINT, {
+          method: "POST",
+          headers: {
+            Authorization: `Bearer ${OPENROUTER_API_KEY}`,
+            "Content-Type": "application/json",
+            "HTTP-Referer": "https://daily-agent.local",
+            "X-Title": "Daily Agent Discovery",
+          },
+          body: JSON.stringify({
+            model: OPENROUTER_MODEL ?? "anthropic/claude-3.5-sonnet",
+            messages: [
+              { role: "system", content: systemPrompt },
+              { role: "user", content: userMessage },
+            ],
+            max_tokens: 2000,
+            temperature: 0.5,
+          }),
+          signal: controller.signal,
+        });
+
+        clearTimeout(timeoutId);
+        return response;
+      } catch (error) {
+        if (retryCount < 2) {
+          console.warn(`OpenRouter API retry ${retryCount + 1}/2:`, error);
+          await new Promise(resolve => setTimeout(resolve, 2000 * (retryCount + 1))); // 2s, 4s backoff
+          return fetchWithRetry(retryCount + 1);
+        }
+        throw error;
+      }
+    };
+
+    const response = await fetchWithRetry();
 
     if (!response.ok) {
       console.error("OpenRouter API error:", response.status, response.statusText);
@@ -909,165 +1133,101 @@ export async function fetchCategoryInsights(params: FetchCategoryParams): Promis
   const categoryDefinition = getDefaultCategoryById(params.categoryId);
   const candidateSourcesRaw = categoryDefinition
     ? getSourcesByCategory(params.categoryId)
-    : sortSourcesByWeight(DISCOVERY_SOURCES).slice(0, 12);
+    : [];
+  const fallbackPool = sortSourcesByWeight(
+    DISCOVERY_SOURCES.filter((source) => !source.disabled)
+  ).slice(0, 12);
+  const candidateSources = candidateSourcesRaw.length > 0 ? candidateSourcesRaw : fallbackPool;
 
-  const candidateSources = candidateSourcesRaw.length > 0 ? candidateSourcesRaw : sortSourcesByWeight(DISCOVERY_SOURCES).slice(0, 12);
-
-  const sortedSources = sortSourcesByWeight(candidateSources).slice(0, 8);
-  const perSourceLimit = Math.max(4, limit);
-
-  const outcomes = await Promise.allSettled(
-    sortedSources.map(async (source) => fetchSourceItems(source, perSourceLimit))
-  );
-
-  const rawItems: RawSourceItem[] = [];
-  const sourceStatuses: SourceStatus[] = [];
-
-  outcomes.forEach((result, index) => {
-    const source = sortedSources[index];
-    if (!source) return;
-
-    if (result.status === "fulfilled") {
-      const outcome = result.value;
-      rawItems.push(...outcome.items);
-
-      const health = sourceHealth.get(source.id);
-      sourceStatuses.push({
-        id: source.id,
-        title: source.title,
-        status: outcome.status,
-        usedFallback: outcome.usedFallback,
-        fromCache: outcome.fromCache,
-        lastSuccessAt: health?.lastSuccessAt ? new Date(health.lastSuccessAt).toISOString() : undefined,
-        lastFailureAt: health?.lastFailureAt ? new Date(health.lastFailureAt).toISOString() : undefined,
-        message: outcome.message,
-      });
-    } else {
-      const reason = result.reason instanceof Error ? result.reason.message : String(result.reason ?? "Unexpected error");
-      recordSourceFailure(source, reason);
-      const health = sourceHealth.get(source.id);
-      sourceStatuses.push({
-        id: source.id,
-        title: source.title,
-        status: "error",
-        usedFallback: false,
-        fromCache: false,
-        lastSuccessAt: health?.lastSuccessAt ? new Date(health.lastSuccessAt).toISOString() : undefined,
-        lastFailureAt: health?.lastFailureAt ? new Date(health.lastFailureAt).toISOString() : undefined,
-        message: reason,
-      });
-    }
-  });
-
-  const deduped = dedupeItems(rawItems);
-  const now = Date.now();
-  const freshCandidates = filterRecentRawItems(deduped, now);
-  const candidatePool = freshCandidates.length > 0
-    ? freshCandidates
-    : deduped.map((item) => ({
-        ...item,
-        reason: item.reason ? `${item.reason} · 近期内容` : "近期内容",
-      }));
-
-  if (candidatePool.length === 0) {
-    const fallbackRaw = sortedSources
-      .flatMap((source) => source.fallbackItems ?? [])
-      .map((item) => ({
-        title: item.title,
-        summary: item.summary,
-        link: item.link,
-        sourceId: sortedSources[0]?.id ?? params.categoryId,
-        sourceName: sortedSources[0]?.title ?? params.categoryName,
-        language: sortedSources[0]?.language ?? "en",
-        reason: "使用预设内容（无可用源）",
-        usedFallback: true,
-      } as RawSourceItem));
-
-    const fallbackItems = buildFallbackHighlights({
-      categoryId: params.categoryId,
-      categoryName: params.categoryName,
-      rawItems: fallbackRaw,
-      limit,
-    });
-
-    markItemsAsSeen(fallbackItems, now);
-
-    return {
-      id: params.categoryId,
-      title: params.categoryName,
-      description:
-        categoryDefinition?.description ?? `AI curated stories for ${params.categoryName}`,
-      items: fallbackItems,
-      retrievedAt: new Date().toISOString(),
-      meta: {
-        fetchedSourceCount: sourceStatuses.length,
-        rawItemCount: 0,
-        usedAI: false,
-        sourceStatuses,
-      },
-    };
-  }
-
-  const sliceForAI = rebalanceBySource(candidatePool, sortedSources.map((source) => source.id), limit * 3);
-
-  // Skip AI processing for GitHub and ProductHunt categories for faster responses
-  if (params.categoryId === "github" || params.categoryId === "producthunt") {
-    const directItems = buildFallbackHighlights({
-      categoryId: params.categoryId,
-      categoryName: params.categoryName,
-      rawItems: sliceForAI,
-      limit,
-    });
-
-    markItemsAsSeen(directItems, now);
-
-    return {
-      id: params.categoryId,
-      title: params.categoryName,
-      description: categoryDefinition?.description ?? `Direct API results for ${params.categoryName}`,
-      items: directItems,
-      retrievedAt: new Date().toISOString(),
-      meta: {
-        fetchedSourceCount: sortedSources.length,
-        rawItemCount: candidatePool.length,
-        usedAI: false,
-        sourceStatuses,
-      },
-    };
-  }
-
-  const aiHighlights = await generateHighlightsWithAI({
-    category: categoryDefinition,
+  return collectCategoryInsights({
     categoryId: params.categoryId,
     categoryName: params.categoryName,
     userPrompt: params.userPrompt,
     limit,
-    rawItems: sliceForAI,
+    sources: candidateSources,
+    categoryDefinition,
   });
+}
 
-  const items = aiHighlights ?? buildFallbackHighlights({
-    categoryId: params.categoryId,
-    categoryName: params.categoryName,
-    rawItems: sliceForAI,
-    limit,
-  });
+export async function fetchDynamicCategoryInsights(options: {
+  categoryName: string;
+  userPrompt?: string;
+  limit?: number;
+  relatedSites?: string[];
+}): Promise<DiscoveryResult> {
+  const { categoryName, userPrompt, limit: requestedLimit, relatedSites = [] } = options;
+  const categoryId = toSlug(categoryName) || "custom-category";
+  const limit = clampLimit(requestedLimit, 6);
+  const prompt = userPrompt?.trim() || categoryName;
+  const isChinesePrompt = /[\u4e00-\u9fa5]/.test(prompt);
 
-  markItemsAsSeen(items, now);
+  const matchedDefaultCategory = DEFAULT_DISCOVERY_CATEGORIES.find((definition) =>
+    categoryId === definition.id || categoryId.includes(definition.id)
+  );
 
-  return {
-    id: params.categoryId,
-    title: params.categoryName,
-    description:
-      categoryDefinition?.description ?? `AI curated stories for ${params.categoryName}`,
-    items,
-    retrievedAt: new Date().toISOString(),
-    meta: {
-      fetchedSourceCount: sortedSources.length,
-      rawItemCount: candidatePool.length,
-      usedAI: Boolean(aiHighlights),
-      sourceStatuses,
+  const baseSources = matchedDefaultCategory
+    ? getSourcesByCategory(matchedDefaultCategory.id)
+    : sortSourcesByWeight(DISCOVERY_SOURCES.filter((source) => !source.disabled)).slice(0, 10);
+
+  const defaultSites = prompt.toLowerCase().includes("ai")
+    ? ["openai.com", "anthropic.com", "deepmind.com", "huggingface.co"]
+    : [];
+
+  const siteList = Array.from(
+    new Set([...defaultSites, ...relatedSites].filter(Boolean))
+  );
+
+  const newsSearchSource: DiscoverySourceConfig = {
+    id: `search-news-${categoryId}`,
+    title: `${categoryName} 最新资讯`,
+    strategy: "search",
+    url: "https://serpapi.com/search.json",
+    language: isChinesePrompt ? "zh" : "en",
+    categories: [],
+    weight: 0.95,
+    options: {
+      provider: "serpapi",
+      engine: "google_news",
+      query: `${prompt} latest`,
+      num: 12,
+      tbs: "qdr:d",
+      hl: isChinesePrompt ? "zh-CN" : "en",
+      gl: isChinesePrompt ? "cn" : "us",
     },
   };
+
+  const siteSearchSources: DiscoverySourceConfig[] = siteList.map((site, index) => ({
+    id: `search-site-${categoryId}-${index}`,
+    title: `${site} 精选`,
+    strategy: "search",
+    url: "https://serpapi.com/search.json",
+    language: isChinesePrompt ? "zh" : "en",
+    categories: [],
+    weight: 0.8,
+    options: {
+      provider: "serpapi",
+      engine: "google",
+      query: `${prompt} site:${site}`,
+      num: 10,
+      tbs: "qdr:d",
+      hl: isChinesePrompt ? "zh-CN" : "en",
+      gl: isChinesePrompt ? "cn" : "us",
+    },
+  }));
+
+  const dynamicSources = [newsSearchSource, ...siteSearchSources, ...baseSources];
+  const uniqueSources = dynamicSources.filter((source, index, array) =>
+    array.findIndex((candidate) => candidate.id === source.id) === index
+  );
+
+  return collectCategoryInsights({
+    categoryId,
+    categoryName,
+    userPrompt: prompt,
+    limit,
+    sources: uniqueSources,
+    categoryDefinition: matchedDefaultCategory,
+  });
 }
 
 export async function fetchAggregatedInsights(categories: Array<{ id: string; name: string; prompt: string }>, limit: number) {

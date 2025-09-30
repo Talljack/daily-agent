@@ -13,7 +13,6 @@ import {
   Briefcase,
   CheckCircle2,
   Code,
-  Globe,
   Layers,
   Loader2,
   Plus,
@@ -83,6 +82,7 @@ type SourceStatus = {
 
 const RESULTS_PER_CATEGORY = 6;
 const CUSTOM_CATEGORY_STORAGE_KEY = "customCategories";
+const PRIMARY_CATEGORY_ID = DEFAULT_DISCOVERY_CATEGORIES[0]?.id ?? "ai";
 
 const CATEGORY_ICON_MAP: Record<string, LucideIcon> = {
   ai: Sparkles,
@@ -96,22 +96,13 @@ const CATEGORY_ICON_MAP: Record<string, LucideIcon> = {
   producthunt: Star,
 };
 
-const DEFAULT_CATEGORIES: CategoryConfig[] = [
-  {
-    id: "all",
-    name: "All",
-    icon: Globe,
-    prompt: "all categories",
-    description: "AI highlights aggregated from every active category"
-  },
-  ...DEFAULT_DISCOVERY_CATEGORIES.map((category) => ({
-    id: category.id,
-    name: category.name,
-    icon: CATEGORY_ICON_MAP[category.id] ?? Layers,
-    prompt: category.prompt,
-    description: category.description,
-  })),
-];
+const BUILTIN_CATEGORIES: CategoryConfig[] = DEFAULT_DISCOVERY_CATEGORIES.map((category) => ({
+  id: category.id,
+  name: category.name,
+  icon: CATEGORY_ICON_MAP[category.id] ?? Layers,
+  prompt: category.prompt,
+  description: category.description,
+}));
 
 function toSlug(value: string) {
   return value
@@ -126,7 +117,7 @@ export default function Home() {
   const pathname = usePathname();
   const searchParams = useSearchParams();
 
-  const [selectedCategory, setSelectedCategoryState] = useState(() => searchParams.get("tab") ?? "all");
+  const [selectedCategory, setSelectedCategoryState] = useState(() => searchParams.get("tab") ?? PRIMARY_CATEGORY_ID);
   const [customCategories, setCustomCategories] = useState<CustomCategory[]>(() => {
     if (typeof window === "undefined") return [];
     try {
@@ -171,7 +162,7 @@ export default function Home() {
 
   const categories = useMemo(() => {
     return [
-      ...DEFAULT_CATEGORIES,
+      ...BUILTIN_CATEGORIES,
       ...customCategories.map<CategoryConfig>((category) => ({
         id: category.id,
         name: category.name,
@@ -220,11 +211,11 @@ export default function Home() {
 
   const selectCategory = useCallback((categoryId: string) => {
     const exists = categories.some((category) => category.id === categoryId);
-    const nextCategory = exists ? categoryId : "all";
+    const nextCategory = exists ? categoryId : PRIMARY_CATEGORY_ID;
     const currentParam = searchParams.get("tab");
     const shouldUpdateUrl =
-      (nextCategory === "all" && currentParam !== null) ||
-      (nextCategory !== "all" && currentParam !== nextCategory);
+      (nextCategory === PRIMARY_CATEGORY_ID && currentParam !== null) ||
+      (nextCategory !== PRIMARY_CATEGORY_ID && currentParam !== nextCategory);
 
     if (nextCategory !== selectedCategory) {
       pendingCategoryRef.current = nextCategory;
@@ -237,7 +228,7 @@ export default function Home() {
 
     if (shouldUpdateUrl) {
       const params = new URLSearchParams(searchParams.toString());
-      if (nextCategory === "all") {
+      if (nextCategory === PRIMARY_CATEGORY_ID) {
         params.delete("tab");
       } else {
         params.set("tab", nextCategory);
@@ -249,12 +240,12 @@ export default function Home() {
 
   useEffect(() => {
     const param = searchParams.get("tab");
-    const candidate = param ?? "all";
+    const candidate = param ?? PRIMARY_CATEGORY_ID;
     const exists = categories.some((category) => category.id === candidate);
-    const nextCategory = exists ? candidate : "all";
+    const nextCategory = exists ? candidate : PRIMARY_CATEGORY_ID;
 
     if (pendingCategoryRef.current) {
-      const expectedParam = pendingCategoryRef.current === "all" ? null : pendingCategoryRef.current;
+      const expectedParam = pendingCategoryRef.current === PRIMARY_CATEGORY_ID ? null : pendingCategoryRef.current;
       if (nextCategory === pendingCategoryRef.current || param === expectedParam) {
         pendingCategoryRef.current = null;
       } else {
@@ -316,13 +307,6 @@ export default function Home() {
     params.set("categoryName", category.name);
     params.set("prompt", category.prompt);
 
-    if (categoryId === "all") {
-      const payload = categories
-        .filter((entry) => entry.id !== "all")
-        .map(({ id, name, prompt }) => ({ id, name, prompt }));
-      params.set("categories", JSON.stringify(payload));
-    }
-
     try {
       const response = await fetch(`/api/ai-search?${params.toString()}`);
       if (!response.ok) {
@@ -374,19 +358,16 @@ export default function Home() {
     fetchCategory(selectedCategory);
   }, [selectedCategory, fetchCategory]);
 
-  useEffect(() => {
-    // Only force refresh when categories change for "all" category
-    if (selectedCategory === "all") {
-      fetchCategory("all", { force: true });
-    }
-  }, [categories, selectedCategory, fetchCategory]);
-
   const activeState = categoryStates[selectedCategory];
   const activeResult = activeState?.result;
   const activeError = activeState?.status === "error" ? activeState.error : undefined;
   const isLoading = activeState?.status === "loading";
   const sourceStatuses = activeResult?.meta?.sourceStatuses ?? [];
   const degradedSources = sourceStatuses.filter((status) => status.status !== "ok");
+  const activeCategoryConfig = useMemo(
+    () => categories.find((category) => category.id === selectedCategory),
+    [categories, selectedCategory]
+  );
 
   const handleRefresh = () => {
     fetchCategory(selectedCategory, { force: true });
@@ -444,7 +425,7 @@ export default function Home() {
       return next;
     });
     if (selectedCategory === categoryId) {
-      selectCategory("all");
+      selectCategory(PRIMARY_CATEGORY_ID);
     }
   };
 
@@ -576,7 +557,7 @@ export default function Home() {
                   {activeResult?.title || categoryNameMap[selectedCategory] || "Loading"}
                 </CardTitle>
                 <p className="text-sm text-gray-500 dark:text-gray-400">
-                  {activeResult?.description || DEFAULT_CATEGORIES.find((category) => category.id === selectedCategory)?.description || "AI generated insights"}
+                  {activeResult?.description || activeCategoryConfig?.description || "AI generated insights"}
                 </p>
               </div>
               {isLoading && <Loader2 className="h-5 w-5 animate-spin text-gray-400" />}

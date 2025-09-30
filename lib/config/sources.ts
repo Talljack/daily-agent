@@ -1,9 +1,11 @@
 export type RssSource = {
   id: string;
   title: string;
-  url: string;
+  url?: string;
   description?: string;
   limit?: number;
+  dynamicSites?: string[];
+  dynamicPrompt?: string;
 };
 
 export const DEFAULT_ITEMS_PER_SOURCE = 5;
@@ -22,6 +24,8 @@ export const RSS_SOURCES: RssSource[] = [
     url: "https://rsshub.app/36kr/newsflashes",
     description: "科技商业快讯",
     limit: 6,
+    dynamicSites: ["36kr.com"],
+    dynamicPrompt: "36氪 科技 创业 快讯 最新",
   },
   {
     id: "dev",
@@ -50,6 +54,8 @@ export const RSS_SOURCES: RssSource[] = [
     url: "https://rsshub.app/zhihu/hotlist",
     description: "产品和设计相关热门讨论",
     limit: 6,
+    dynamicSites: ["zhihu.com"],
+    dynamicPrompt: "知乎 热榜 产品 设计 科技 热点",
   },
 ];
 

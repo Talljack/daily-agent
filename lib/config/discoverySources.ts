@@ -9,6 +9,7 @@ export type DiscoverySourceConfig = {
   categories: string[];
   weight?: number;
   options?: Record<string, unknown>;
+  disabled?: boolean; // Add disabled flag
   fallbackItems?: Array<{
     title: string;
     summary: string;
@@ -212,14 +213,14 @@ export const DISCOVERY_SOURCES: DiscoverySourceConfig[] = [
     id: "designdrop",
     title: "DESIGNDROP",
     strategy: "rss",
-    url: "https://rsshub.app/designdrop",
+    url: "https://designdrop.substack.com/feed",
     language: "en",
     categories: ["product"],
     fallbackItems: [
       {
         title: "DesignDrop：AI 参与的产品设计流程案例",
         summary: "DesignDrop 分享了一个将生成式 AI 引入设计流程的案例研究。",
-        link: "https://designdrop.io"
+        link: "https://designdrop.substack.com"
       }
     ]
   },
@@ -301,16 +302,16 @@ export const DISCOVERY_SOURCES: DiscoverySourceConfig[] = [
   },
   {
     id: "nomadlist",
-    title: "Nomad List",
-    strategy: "jina",
-    url: "https://nomadlist.com/blog",
+    title: "Nomad List (Digital Nomads World)",
+    strategy: "rss",
+    url: "https://digitalnomads.world/feed/",
     language: "en",
     categories: ["remote"],
     fallbackItems: [
       {
-        title: "Nomad List：数字游民分享的远程团队协作经验",
-        summary: "Nomad List 整理了近期社区中关于跨时区协作的经验总结。",
-        link: "https://nomadlist.com/blog"
+        title: "Digital Nomads：远程团队协作经验精选",
+        summary: "Digital Nomads World 汇总了数字游民社区关于跨时区协作的实战分享。",
+        link: "https://digitalnomads.world"
       }
     ]
   },
@@ -348,14 +349,14 @@ export const DISCOVERY_SOURCES: DiscoverySourceConfig[] = [
     id: "a16z-blog",
     title: "a16z Blog",
     strategy: "rss",
-    url: "https://a16z.com/feed/",
+    url: "https://future.com/feed/",
     language: "en",
     categories: ["business", "ai"],
     fallbackItems: [
       {
         title: "a16z：生成式 AI 创业的新市场机会",
         summary: "Andreessen Horowitz 团队分享了生成式 AI 创业公司的最新赛道观察。",
-        link: "https://a16z.com"
+        link: "https://future.com"
       }
     ]
   },
@@ -363,7 +364,7 @@ export const DISCOVERY_SOURCES: DiscoverySourceConfig[] = [
     id: "sequoia-arc",
     title: "Sequoia Arc",
     strategy: "rss",
-    url: "https://www.sequoiacap.com/article/feed/",
+    url: "https://www.sequoiacap.com/feed/",
     language: "en",
     categories: ["business"],
     fallbackItems: [
@@ -378,14 +379,14 @@ export const DISCOVERY_SOURCES: DiscoverySourceConfig[] = [
     id: "notion-blog",
     title: "Notion Blog",
     strategy: "rss",
-    url: "https://www.notion.so/blog/rss.xml",
+    url: "https://notion.substack.com/feed",
     language: "en",
     categories: ["product"],
     fallbackItems: [
       {
         title: "Notion：AI 辅助文档的新模板",
         summary: "Notion 团队介绍了结合 AI 的知识管理新模板和自动化能力。",
-        link: "https://www.notion.so/blog"
+        link: "https://notion.substack.com"
       }
     ]
   },
@@ -393,14 +394,14 @@ export const DISCOVERY_SOURCES: DiscoverySourceConfig[] = [
     id: "figma-blog",
     title: "Figma Blog",
     strategy: "rss",
-    url: "https://www.figma.com/blog/feed.xml",
+    url: "https://figma.medium.com/feed",
     language: "en",
     categories: ["product", "developer"],
     fallbackItems: [
       {
         title: "Figma：AI 在界面设计交付中的角色",
         summary: "Figma 团队展示了如何借助 AI 功能提升设计交付效率。",
-        link: "https://www.figma.com/blog"
+        link: "https://figma.medium.com"
       }
     ]
   },
@@ -408,7 +409,7 @@ export const DISCOVERY_SOURCES: DiscoverySourceConfig[] = [
     id: "byrslf-growth",
     title: "Byrslf Growth",
     strategy: "rss",
-    url: "https://rsshub.app/byrslf/notes",
+    url: "https://byrslf.co/feed",
     language: "zh",
     categories: ["product", "business"],
     fallbackItems: [
@@ -467,9 +468,9 @@ export const DISCOVERY_SOURCES: DiscoverySourceConfig[] = [
 ];
 
 export function getSourcesByCategory(categoryId: string) {
-  return DISCOVERY_SOURCES.filter((source) => source.categories.includes(categoryId));
+  return DISCOVERY_SOURCES.filter((source) => source.categories.includes(categoryId) && !source.disabled);
 }
 
 export function getGlobalFallbackSources() {
-  return DISCOVERY_SOURCES.filter((source) => source.categories.length === 0);
+  return DISCOVERY_SOURCES.filter((source) => source.categories.length === 0 && !source.disabled);
 }

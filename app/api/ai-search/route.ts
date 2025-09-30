@@ -2,6 +2,7 @@ import { NextRequest } from "next/server";
 import {
   fetchAggregatedInsights,
   fetchCategoryInsights,
+  fetchDynamicCategoryInsights,
   getDefaultCategoriesSnapshot,
 } from "@/lib/services/discoveryAggregator";
 import { getDefaultCategoryById } from "@/lib/config/discoveryCategories";
@@ -75,11 +76,16 @@ export async function GET(request: NextRequest) {
     const categoryNameParam = url.searchParams.get("categoryName")?.trim();
     const promptParam = url.searchParams.get("prompt")?.trim();
     const categoriesParam = url.searchParams.get("categories");
+    const sitesParam = url.searchParams.get("sites");
 
-    const resolvedCategoryId = toSlug(categoryIdParam ?? "all");
+    const fallbackCategoryId = getDefaultCategoriesSnapshot()[0]?.id ?? "ai";
+    const resolvedCategoryId = toSlug(categoryIdParam ?? fallbackCategoryId);
     const defaultCategory = getDefaultCategoryById(resolvedCategoryId);
     const resolvedCategoryName = categoryNameParam ?? defaultCategory?.name ?? resolvedCategoryId;
     const resolvedPrompt = promptParam ?? defaultCategory?.prompt ?? resolvedCategoryName;
+    const relatedSites = sitesParam
+      ? sitesParam.split(",").map((site) => site.trim()).filter(Boolean)
+      : [];
 
     if (resolvedCategoryId === "all") {
       const parsedCategories = parseCategoriesParam(categoriesParam);
@@ -87,6 +93,17 @@ export async function GET(request: NextRequest) {
 
       const aggregate = await fetchAggregatedInsights(categories, limit);
       return Response.json(aggregate);
+    }
+
+    if (!defaultCategory) {
+      const dynamicResult = await fetchDynamicCategoryInsights({
+        categoryName: resolvedCategoryName,
+        userPrompt: resolvedPrompt,
+        limit,
+        relatedSites,
+      });
+
+      return Response.json(dynamicResult);
     }
 
     const result = await fetchCategoryInsights({
