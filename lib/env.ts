@@ -1,11 +1,18 @@
 import { z } from 'zod';
 
+const optionalNonEmptyString = () =>
+  z.preprocess((value) => {
+    if (typeof value !== 'string') return value;
+    const trimmed = value.trim();
+    return trimmed.length > 0 ? trimmed : undefined;
+  }, z.string().optional());
+
 const envSchema = z.object({
   // OpenRouter API Configuration
-  OPENROUTER_API_KEY: z
-    .string()
-    .startsWith('sk-', 'OPENROUTER_API_KEY must start with sk-or-v1-')
-    .optional(),
+  OPENROUTER_API_KEY: optionalNonEmptyString()
+    .refine((value) => value === undefined || value.startsWith('sk-'), {
+      message: 'OPENROUTER_API_KEY must start with sk-or-v1-',
+    }),
 
   OPENROUTER_MODEL: z
     .string()
@@ -13,35 +20,40 @@ const envSchema = z.object({
     .default('x-ai/grok-4-fast:free'),
 
   // Fallback OpenAI API (optional)
-  OPENAI_API_KEY: z
-    .string()
-    .startsWith('sk-', 'OPENAI_API_KEY must start with sk-')
-    .optional(),
+  OPENAI_API_KEY: optionalNonEmptyString()
+    .refine((value) => value === undefined || value.startsWith('sk-'), {
+      message: 'OPENAI_API_KEY must start with sk-',
+    }),
 
-  SERPAPI_API_KEY: z.string().min(1).optional(),
+  SERPAPI_API_KEY: optionalNonEmptyString(),
 
-  GITHUB_TOKEN: z.string().min(1).optional(),
+  GITHUB_TOKEN: optionalNonEmptyString(),
 
-  PRODUCTHUNT_API_TOKEN: z
-    .string()
-    .min(1, 'PRODUCTHUNT_API_TOKEN is required for Product Hunt API')
-    .optional(),
+  PRODUCTHUNT_API_TOKEN: optionalNonEmptyString(),
 
   // Email Configuration (optional)
-  SMTP_HOST: z.string().optional(),
-  SMTP_PORT: z
+  SMTP_HOST: optionalNonEmptyString(),
+  SMTP_PORT: z.preprocess((value) => {
+    if (typeof value !== 'string') return value;
+    const trimmed = value.trim();
+    return trimmed.length > 0 ? trimmed : undefined;
+  }, z
     .string()
     .transform((val) => parseInt(val, 10))
     .pipe(z.number().min(1).max(65535))
-    .optional(),
-  SMTP_USER: z.string().email().optional(),
-  SMTP_PASS: z.string().min(1).optional(),
-  EMAIL_FROM: z.string().email().optional(),
-  EMAIL_TO: z
+    .optional()),
+  SMTP_USER: optionalNonEmptyString().pipe(z.string().email().optional()),
+  SMTP_PASS: optionalNonEmptyString(),
+  EMAIL_FROM: optionalNonEmptyString().pipe(z.string().email().optional()),
+  EMAIL_TO: z.preprocess((value) => {
+    if (typeof value !== 'string') return value;
+    const trimmed = value.trim();
+    return trimmed.length > 0 ? trimmed : undefined;
+  }, z
     .string()
     .transform((val) => val.split(',').map(email => email.trim()))
     .pipe(z.array(z.string().email()))
-    .optional(),
+    .optional()),
 
   DAILY_CRON_SCHEDULE: z
     .string()
