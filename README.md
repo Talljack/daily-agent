@@ -1,26 +1,26 @@
 # Daily Agent - 自动化日报系统
 
-一个基于 Next.js + TypeScript + LangChain 的自动化日报生成系统，每日自动汇聚多源资讯并生成AI摘要。支持远程工作数据获取和邮件推送功能。
+一个基于 Next.js + TypeScript + LangChain 的自动化日报生成系统，每日自动汇聚多源资讯并生成 AI 摘要，支持远程岗位抓取和邮件推送。
 
 ## ✨ 功能特性
 
 - 🤖 **AI驱动**: 使用 OpenAI/OpenRouter 模型生成专业日报摘要
 - 📡 **多源汇聚**: 自动拉取知乎热榜、36氪快讯、Hacker News等资讯
 - ⏰ **定时任务**: 支持cron定时执行，每日自动生成日报
-- 📧 **邮件推送**: 支持将日报通过邮件自动发送
-- 💼 **远程工作**: 集成远程工作相关资讯源
+- 📧 **邮件推送**: 支持 SMTP 邮件自动发送
+- 💼 **远程工作**: 集成 RemoteOK、Remotive、We Work Remotely 等岗位源
 - 🎨 **现代UI**: 基于 Next.js + TailwindCSS + 21st.dev 的响应式界面
 - 📱 **实时刷新**: 支持手动触发和实时更新
 
 ## 🏗️ 技术栈
 
-- **前端**: Next.js 14, React 18, TypeScript
+- **前端**: Next.js 15, React 19, TypeScript
 - **UI组件**: 21st.dev, TailwindCSS
 - **后端**: Next.js API Routes
 - **AI**: LangChain + OpenAI/OpenRouter
 - **数据源**: RSS Parser + RSShub
 - **定时任务**: node-cron
-- **邮件服务**: (待集成)
+- **邮件服务**: Nodemailer + SMTP
 
 ## 📦 项目结构
 
@@ -36,7 +36,8 @@ daily-agent/
 │   ├── services/         # 服务层 (日报生成)
 │   └── tools/            # 工具函数 (RSS解析)
 ├── scripts/              # 脚本文件
-│   └── cron.ts          # 定时任务脚本
+│   ├── cron.ts          # 单次执行脚本
+│   └── scheduler.ts     # 常驻调度器
 └── docs/                # 项目文档
 ```
 
@@ -52,19 +53,32 @@ pnpm install
 ```
 
 ### 2. 环境配置
-创建 `.env.local` 文件：
+复制环境变量模板并填写真实值：
 ```bash
-# OpenAI API配置 (可选)
-OPENAI_API_KEY=your_openai_api_key
-
-# OpenRouter API配置 (推荐)
-OPENROUTER_API_KEY=your_openrouter_api_key
-
-# 邮件服务配置 (待集成)
-# SMTP_HOST=smtp.gmail.com
-# SMTP_USER=your_email@gmail.com
-# SMTP_PASS=your_email_password
+cp .env.example .env.local
 ```
+
+`.env.local` 至少需要：
+```bash
+# AI 摘要
+OPENROUTER_API_KEY=sk-or-v1-your-openrouter-key
+OPENROUTER_MODEL=x-ai/grok-4-fast:free
+
+# 邮件推送
+SMTP_HOST=smtp.gmail.com
+SMTP_PORT=465
+SMTP_USER=you@example.com
+SMTP_PASS=your-app-password
+EMAIL_FROM=you@example.com
+EMAIL_TO=you@example.com
+
+# 定时配置
+DAILY_CRON_SCHEDULE=0 8 * * *
+DAILY_TIMEZONE=Asia/Shanghai
+```
+
+`EMAIL_TO` 支持多个收件人，使用英文逗号分隔。
+`EMAIL_FROM` 当前需要填写纯邮箱地址，以匹配项目内的环境变量校验规则。
 
 ### 3. 启动开发服务器
 ```bash
@@ -75,49 +89,98 @@ pnpm dev
 
 ### 4. 手动生成日报
 ```bash
-# 执行定时任务脚本
-npx tsx scripts/cron.ts
+# 执行一次“抓取 + AI 摘要 + 邮件发送”
+pnpm cron
 
-# 或者通过 API 接口
+# 或者通过 API 接口只拉取报告 JSON
 curl http://localhost:3000/api/daily
 ```
 
 ## ⚙️ 定时任务详解
 
-### cron.ts 文件运行方式
-`/scripts/cron.ts` 使用 `node-cron` 实现：
-- **执行时间**: 每天早上8点 (`"0 8 * * *"`)
-- **运行方式**: 需要单独执行进程
-- **推荐运行**:
-  ```bash
-  # 开发环境
-  npx tsx scripts/cron.ts
+### 方式 1：用 Codex App Automations 调度
+如果你想“每天自动发一封资讯 + 远程岗位摘要邮件”，优先用 Codex App 的 Automations 触发一次性命令，而不是常驻 `node-cron` 进程。
 
-  # 生产环境
-  node -r tsx/cjs scripts/cron.ts
-  ```
+Automation 命令直接填：
+```bash
+cd /Users/yugangcao/apps/my-apps/daily-agent && pnpm cron
+```
+
+建议配置：
+- **频率**: Every day
+- **时间**: 08:00
+- **时区**: `Asia/Shanghai`
+- **结果**: 成功时会抓取多源资讯、聚合远程岗位、生成 AI 摘要，并按 `EMAIL_TO` 发信
+
+### 方式 2：用 GitHub Actions 每天自动发邮件
+如果你不想自己维护本机脚本常驻，也不想手动触发，仓库里现在已经带了 GitHub Actions 工作流：
+
+文件：
+```bash
+.github/workflows/daily-email.yml
+```
+
+它会在每天 `08:00 Asia/Shanghai` 自动执行一次，并直接发送邮件。你只需要在 GitHub 仓库的 `Settings -> Secrets and variables -> Actions` 里配置这些 secrets：
+
+- `OPENROUTER_API_KEY`
+- `OPENROUTER_MODEL`（可选，不填则走默认模型）
+- `OPENAI_API_KEY`（可选）
+- `SERPAPI_API_KEY`（可选）
+- `PRODUCTHUNT_API_TOKEN`（可选）
+- `SMTP_HOST`
+- `SMTP_PORT`
+- `SMTP_USER`
+- `SMTP_PASS`
+- `EMAIL_FROM`
+- `EMAIL_TO`
+
+配置好以后：
+- GitHub 会按 UTC 定时触发
+- 当前工作流里 `0 0 * * *` 对应北京时间每天早上 `08:00`
+- 也可以在 `Actions` 页面手动点 `Run workflow` 立即测试一次
+
+### 方式 3：自托管常驻调度器
+如果你自己用服务器或本机守护进程，可以运行内置 scheduler：
+```bash
+pnpm scheduler
+```
+
+它会按照 `.env.local` 里的 `DAILY_CRON_SCHEDULE` 和 `DAILY_TIMEZONE` 常驻执行。
 
 ### 部署选项
 ```bash
-# 使用 PM2 管理 (推荐)
-pm2 start scripts/cron.ts --name daily-cron --interpreter tsx
+# GitHub Actions
+# 直接提交仓库并配置 GitHub Actions secrets，无需本地常驻进程
 
-# 或添加到系统 crontab
-0 8 * * * cd /path/to/daily-agent && npx tsx scripts/cron.ts
+# 使用 PM2 管理常驻调度器
+pm2 start "pnpm scheduler" --name daily-agent-scheduler
+
+# 或添加到系统 crontab 执行一次性任务
+0 8 * * * cd /path/to/daily-agent && pnpm cron
 ```
 
 ## 🌐 数据源配置
 
-编辑 `lib/config/sources.ts` 添加更多RSS源：
+默认日报已经包含：
+- Hacker News
+- 36氪快讯
+- Dev.to
+- Reddit 编程
+- 知乎热榜
+- RemoteOK / Remotive / We Work Remotely 远程岗位
+
+如需新增或删减信息源，编辑 `lib/config/sources.ts`：
 ```typescript
 {
-  id: "remote_work",
-  title: "远程工作资讯",
-  url: "https://rsshub.app/remote-work/jobs",
-  description: "最新远程工作机会",
-  limit: 5
+  id: "custom-remote",
+  title: "自定义远程岗位源",
+  url: "https://example.com/jobs.rss",
+  description: "团队内部关注的招聘源",
+  limit: 4
 }
 ```
+
+如果你只想看远程岗位，也可以在前端打开 `Remote Work` 分类，该分类会使用 `lib/config/discoverySources.ts` 中的多个远程工作源进行聚合。
 
 ## 🤝 开源目标
 

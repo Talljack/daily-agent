@@ -10,6 +10,8 @@
     "lint": "next lint",
     "cron": "tsx --env-file=.env.local scripts/cron.ts",
     "cron:dev": "tsx --env-file=.env.local watch scripts/cron.ts",
+    "scheduler": "tsx --env-file=.env.local scripts/scheduler.ts",
+    "scheduler:dev": "tsx --env-file=.env.local watch scripts/scheduler.ts",
     "daily": "tsx --env-file=.env.local -e \"import('./lib/services/dailyReport.js').then(m => m.buildDailyReport()).then(r => console.log(r.summary)).catch(e => console.error(e))\""
   },
   "dependencies": {

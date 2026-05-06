@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -112,7 +112,7 @@ function toSlug(value: string) {
     .replace(/[^a-z0-9-]/g, "");
 }
 
-export default function Home() {
+function HomeContent() {
   const router = useRouter();
   const pathname = usePathname();
   const searchParams = useSearchParams();
@@ -638,5 +638,28 @@ export default function Home() {
 
       <ChatSidebar />
     </div>
+  );
+}
+
+function HomeFallback() {
+  return (
+    <div className="min-h-screen bg-neutral-50 dark:bg-neutral-950">
+      <div className="mx-auto max-w-6xl px-4 pb-16 pt-10">
+        <Card className="border-gray-200 bg-white shadow-sm dark:border-gray-800 dark:bg-gray-900">
+          <CardContent className="flex items-center justify-center gap-2 p-8 text-sm text-gray-500 dark:text-gray-400">
+            <Loader2 className="h-4 w-4 animate-spin" />
+            正在加载日报…
+          </CardContent>
+        </Card>
+      </div>
+    </div>
+  );
+}
+
+export default function Home() {
+  return (
+    <Suspense fallback={<HomeFallback />}>
+      <HomeContent />
+    </Suspense>
   );
 }

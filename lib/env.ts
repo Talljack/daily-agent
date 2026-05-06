@@ -43,6 +43,16 @@ const envSchema = z.object({
     .pipe(z.array(z.string().email()))
     .optional(),
 
+  DAILY_CRON_SCHEDULE: z
+    .string()
+    .min(1, 'DAILY_CRON_SCHEDULE is required')
+    .default('0 8 * * *'),
+
+  DAILY_TIMEZONE: z
+    .string()
+    .min(1, 'DAILY_TIMEZONE is required')
+    .default('Asia/Shanghai'),
+
   // Application Configuration
   NODE_ENV: z
     .enum(['development', 'production', 'test'])
@@ -87,6 +97,8 @@ export const {
   SMTP_PASS,
   EMAIL_FROM,
   EMAIL_TO,
+  DAILY_CRON_SCHEDULE,
+  DAILY_TIMEZONE,
   NODE_ENV,
   PORT,
 } = env;
