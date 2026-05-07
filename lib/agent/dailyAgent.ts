@@ -46,6 +46,16 @@ function extractTextContent(content: unknown): string {
 }
 
 async function requestOpenRouterSummary(content: string): Promise<string> {
+  return invokeOpenRouter({
+    system: systemPrompt,
+    user: `原始抓取内容如下，请生成日报摘要：\n\n${content}`,
+  });
+}
+
+async function invokeOpenRouter(options: {
+  system: string;
+  user: string;
+}): Promise<string> {
   if (!OPENROUTER_API_KEY) {
     throw new Error("未配置 OPENROUTER_API_KEY");
   }
@@ -62,8 +72,8 @@ async function requestOpenRouterSummary(content: string): Promise<string> {
       model: OPENROUTER_MODEL || "openrouter/auto",
       temperature: 0.3,
       messages: [
-        { role: "system", content: systemPrompt },
-        { role: "user", content: `原始抓取内容如下，请生成日报摘要：\n\n${content}` },
+        { role: "system", content: options.system },
+        { role: "user", content: options.user },
       ],
     }),
   });
@@ -106,4 +116,42 @@ export async function* generateSummaryStream(content: string): AsyncGenerator<st
     console.error("AI流式调用失败:", error);
     throw error;
   }
+}
+
+export async function generateRemoteJobsMarkdown(options: {
+  date: string;
+  content: string;
+}): Promise<string> {
+  const remoteJobsPrompt = `你是一个每天为候选人整理远程开发岗位的求职助手。请把输入岗位整理成一封中文岗位推荐邮件正文。
+
+严格要求：
+1. 只输出正文，不要解释，不要加代码块。
+2. 第一行必须是：今天找到 N 个值得投递的岗位。
+3. 第二行必须是：说明：......
+4. 分组标题必须优先使用：
+## 国内高优先级可直接投
+## 国内可投但需确认条件
+## 海外高匹配补充岗位
+5. 每个岗位必须用下面格式：
+1. S | 岗位名称 | 公司 | 来源：V2EX
+- 远程范围：
+- 地点/时区要求：
+- 英语要求：
+- 技术栈匹配点：
+- 为什么适合候选人：
+- 主要风险/不确定性：
+- 申请链接：
+- 建议投递动作：
+6. 最后必须有：
+## 今日推荐投递顺序
+## 建议简历关键词微调
+7. 优先展示 V2EX 和电鸭中的国内远程开发岗，其次再放海外远程站。
+8. 不要把普通科技资讯写进正文，只写远程岗位推荐。
+9. 如果信息不足，要诚实写“未说明，建议投递前确认”，不要编造。
+10. 主题不要出现在正文里。邮件主题由外部单独设置为：每日远程岗位推荐 - ${options.date}`;
+
+  return invokeOpenRouter({
+    system: remoteJobsPrompt,
+    user: `请基于以下远程岗位原始信息生成岗位推荐邮件正文，日期是 ${options.date}：\n\n${options.content}`,
+  });
 }

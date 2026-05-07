@@ -2,7 +2,7 @@ import nodemailer from 'nodemailer';
 import type { DailyReport } from './dailyReport';
 import { hasEmailConfig, SMTP_HOST, SMTP_PORT, SMTP_USER, SMTP_PASS, EMAIL_FROM, EMAIL_TO } from '@/lib/env';
 
-const REMOTE_SOURCE_IDS = new Set(["remote", "remotive", "weworkremotely"]);
+const REMOTE_SOURCE_IDS = new Set(["remote", "v2ex-remote", "eleduck", "remotive", "weworkremotely"]);
 
 export interface EmailConfig {
   host: string;
@@ -57,7 +57,93 @@ export class EmailService {
     return { remoteSources, otherSources };
   }
 
+  private inlineFormat(text: string) {
+    return text
+      .replace(/&/g, "&amp;")
+      .replace(/</g, "&lt;")
+      .replace(/>/g, "&gt;")
+      .replace(/`([^`]+)`/g, "<code>$1</code>")
+      .replace(
+        /(https?:\/\/[^\s<]+)/g,
+        '<a href="$1" style="color: #2563eb; text-decoration: underline;">$1</a>',
+      );
+  }
+
+  private markdownToPlainText(body: string) {
+    const lines: string[] = [];
+    for (const rawLine of body.split("\n")) {
+      const line = rawLine.trimEnd();
+      const stripped = line.trim();
+      if (!stripped) {
+        lines.push("");
+        continue;
+      }
+      if (stripped.startsWith("## ")) {
+        lines.push(stripped.slice(3));
+        lines.push("-".repeat(Math.max(8, stripped.length - 3)));
+        continue;
+      }
+      if (/^\d+\.\s+/.test(stripped)) {
+        lines.push(stripped);
+        continue;
+      }
+      if (stripped.startsWith("- ")) {
+        lines.push(`• ${stripped.slice(2)}`);
+        continue;
+      }
+      lines.push(stripped);
+    }
+    return lines.join("\n").trim();
+  }
+
+  private markdownToHtml(body: string) {
+    const blocks: string[] = [];
+    let listOpen = false;
+
+    const closeList = () => {
+      if (listOpen) {
+        blocks.push("</ul>");
+        listOpen = false;
+      }
+    };
+
+    for (const rawLine of body.split("\n")) {
+      const line = rawLine.trim();
+      if (!line) {
+        closeList();
+        continue;
+      }
+      if (line.startsWith("## ")) {
+        closeList();
+        blocks.push(`<h2 style="margin: 28px 0 12px; font-size: 22px; color: #111827;">${this.inlineFormat(line.slice(3))}</h2>`);
+        continue;
+      }
+      if (/^\d+\.\s+/.test(line)) {
+        closeList();
+        blocks.push(`<p style="margin: 18px 0 8px; font-size: 18px; font-weight: 700; color: #111827;">${this.inlineFormat(line)}</p>`);
+        continue;
+      }
+      if (line.startsWith("- ")) {
+        if (!listOpen) {
+          blocks.push('<ul style="margin: 0 0 14px 0; padding-left: 22px; color: #374151;">');
+          listOpen = true;
+        }
+        blocks.push(`<li style="margin: 6px 0; line-height: 1.7;">${this.inlineFormat(line.slice(2))}</li>`);
+        continue;
+      }
+      closeList();
+      blocks.push(`<p style="margin: 10px 0; line-height: 1.8; color: #374151;">${this.inlineFormat(line)}</p>`);
+    }
+
+    closeList();
+    return blocks.join("\n");
+  }
+
   private generateEmailHtml(report: DailyReport): string {
+    if (report.emailMarkdown) {
+      return this.generateRemoteJobsEmailHtml(report);
+    }
+
     const date = new Date(report.generatedAt).toLocaleDateString('zh-CN', {
       year: 'numeric',
       month: 'long',
@@ -164,7 +250,45 @@ export class EmailService {
     `;
   }
 
+  private generateRemoteJobsEmailHtml(report: DailyReport): string {
+    const date = new Date(report.generatedAt).toLocaleDateString('zh-CN', {
+      year: 'numeric',
+      month: 'long',
+      day: 'numeric',
+      weekday: 'long',
+    });
+    const bodyHtml = this.markdownToHtml(report.emailMarkdown ?? "");
+    const preheader = "今日远程岗位推荐已更新，优先查看国内高匹配岗位和可直接投递机会。";
+
+    return `
+      <!DOCTYPE html>
+      <html lang="zh-CN">
+      <head>
+        <meta charset="UTF-8">
+        <meta name="viewport" content="width=device-width, initial-scale=1.0">
+        <title>${report.emailSubject ?? "每日远程岗位推荐"}</title>
+      </head>
+      <body style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; line-height: 1.65; color: #222; background: #f3f4f6; margin: 0; padding: 24px 0;">
+        <div style="display:none;max-height:0;overflow:hidden;opacity:0;mso-hide:all;">${preheader}</div>
+        <div style="max-width: 860px; margin: 0 auto; background: #ffffff; border-radius: 24px; padding: 36px 40px; box-shadow: 0 20px 50px rgba(15, 23, 42, 0.08);">
+          <div style="margin-bottom: 28px;">
+            <h1 style="margin: 0; font-size: 30px; color: #111827;">每日远程岗位推荐</h1>
+            <p style="margin: 10px 0 0 0; color: #6b7280; font-size: 15px;">${date}</p>
+          </div>
+          <div style="font-size: 16px;">
+            ${bodyHtml}
+          </div>
+        </div>
+      </body>
+      </html>
+    `;
+  }
+
   private generateEmailText(report: DailyReport): string {
+    if (report.emailMarkdown) {
+      return this.markdownToPlainText(report.emailMarkdown);
+    }
+
     const date = new Date(report.generatedAt).toLocaleDateString('zh-CN');
     const { remoteSources, otherSources } = this.splitSources(report);
     const remoteItems = remoteSources.flatMap((source) =>
@@ -221,7 +345,7 @@ ${report.summary}
 
   async sendDailyReport(report: DailyReport): Promise<void> {
     const date = new Date(report.generatedAt).toLocaleDateString('zh-CN');
-    const subject = `💼 Daily Agent 远程岗位日报 - ${date}`;
+    const subject = report.emailSubject ?? `💼 Daily Agent 远程岗位日报 - ${date}`;
 
     const mailOptions = {
       from: this.config.from,
