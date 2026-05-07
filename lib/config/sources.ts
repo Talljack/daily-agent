@@ -6,6 +6,7 @@ export type RssSource = {
   limit?: number;
   dynamicSites?: string[];
   dynamicPrompt?: string;
+  sourceType?: "rss" | "remote-v2ex" | "remote-eleduck";
 };
 
 export const DEFAULT_ITEMS_PER_SOURCE = 5;
@@ -17,6 +18,20 @@ export const RSS_SOURCES: RssSource[] = [
     url: "https://remoteok.io/remote-jobs.rss",
     description: "最新远程工作机会",
     limit: 4,
+  },
+  {
+    id: "v2ex-remote",
+    title: "V2EX 远程岗位",
+    description: "国内中文社区中的远程开发岗位帖子",
+    limit: 6,
+    sourceType: "remote-v2ex",
+  },
+  {
+    id: "eleduck",
+    title: "电鸭远程岗位",
+    description: "电鸭社区最近的远程开发岗位",
+    limit: 6,
+    sourceType: "remote-eleduck",
   },
   {
     id: "remotive",
@@ -38,6 +53,7 @@ export const RSS_SOURCES: RssSource[] = [
     url: "https://hnrss.org/frontpage",
     description: "全球技术热点",
     limit: 6,
+    sourceType: "rss",
   },
   {
     id: "business",
@@ -47,6 +63,7 @@ export const RSS_SOURCES: RssSource[] = [
     limit: 6,
     dynamicSites: ["36kr.com"],
     dynamicPrompt: "36氪 科技 创业 快讯 最新",
+    sourceType: "rss",
   },
   {
     id: "dev",
@@ -54,6 +71,7 @@ export const RSS_SOURCES: RssSource[] = [
     url: "https://dev.to/feed",
     description: "开发者社区热门文章",
     limit: 6,
+    sourceType: "rss",
   },
   {
     id: "reddit",
@@ -61,6 +79,7 @@ export const RSS_SOURCES: RssSource[] = [
     url: "https://www.reddit.com/r/programming/.rss",
     description: "Reddit 编程讨论热点",
     limit: 6,
+    sourceType: "rss",
   },
   {
     id: "product",
@@ -70,6 +89,7 @@ export const RSS_SOURCES: RssSource[] = [
     limit: 6,
     dynamicSites: ["zhihu.com"],
     dynamicPrompt: "知乎 热榜 产品 设计 科技 热点",
+    sourceType: "rss",
   },
 ];
 

@@ -1,10 +1,11 @@
 import { generateSummary } from "@/lib/agent/dailyAgent";
 import { RSS_SOURCES, DEFAULT_ITEMS_PER_SOURCE, type RssSource } from "@/lib/config/sources";
 import { fetchRSS, RSSItem } from "@/lib/tools/rssTool";
+import { fetchEleduckRemoteJobs, fetchV2exRemoteTopics } from "@/lib/tools/remoteJobSources";
 import { fetchDynamicCategoryInsights } from "@/lib/services/discoveryAggregator";
 import { hasAIConfig } from "@/lib/env";
 
-const REMOTE_SOURCE_IDS = new Set(["remote", "remotive", "weworkremotely"]);
+const REMOTE_SOURCE_IDS = new Set(["remote", "v2ex-remote", "eleduck", "remotive", "weworkremotely"]);
 
 export type DailySourceItem = {
   title: string;
@@ -49,6 +50,24 @@ async function loadRssItems(sourceUrl: string, limit?: number): Promise<RSSItem[
 }
 
 async function loadDailySourceItems(source: RssSource, limit: number) {
+  if (source.sourceType === "remote-v2ex") {
+    const items = (await fetchV2exRemoteTopics(limit)).map((item) => ({
+      title: item.title,
+      link: item.link,
+      summary: item.content,
+    }));
+    return { items, mode: "rss" as const };
+  }
+
+  if (source.sourceType === "remote-eleduck") {
+    const items = (await fetchEleduckRemoteJobs(limit)).map((item) => ({
+      title: item.title,
+      link: item.link,
+      summary: item.content,
+    }));
+    return { items, mode: "rss" as const };
+  }
+
   let lastError: Error | null = null;
 
   if (source.dynamicSites && source.dynamicSites.length > 0) {
