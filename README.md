@@ -6,7 +6,7 @@
 
 - 🤖 **AI驱动**: 使用 OpenAI/OpenRouter 模型生成专业日报摘要
 - 📡 **多源汇聚**: 自动拉取知乎热榜、36氪快讯、Hacker News等资讯
-- ⏰ **定时任务**: 支持cron定时执行，每日自动生成日报
+- ⏰ **定时任务**: 支持本地或自托管 cron 定时执行
 - 📧 **邮件推送**: 支持 SMTP 邮件自动发送
 - 💼 **远程工作**: 集成 RemoteOK、Remotive、We Work Remotely 等岗位源
 - 🎨 **现代UI**: 基于 Next.js + TailwindCSS + 21st.dev 的响应式界面
@@ -112,34 +112,7 @@ cd /Users/yugangcao/apps/my-apps/daily-agent && pnpm cron
 - **时区**: `Asia/Shanghai`
 - **结果**: 成功时会抓取多源资讯、聚合远程岗位、生成 AI 摘要，并按 `EMAIL_TO` 发信
 
-### 方式 2：用 GitHub Actions 每天自动发邮件
-如果你不想自己维护本机脚本常驻，也不想手动触发，仓库里现在已经带了 GitHub Actions 工作流：
-
-文件：
-```bash
-.github/workflows/daily-email.yml
-```
-
-它会在每天 `08:00 Asia/Shanghai` 自动执行一次，并直接发送邮件。你只需要在 GitHub 仓库的 `Settings -> Secrets and variables -> Actions` 里配置这些 secrets：
-
-- `OPENROUTER_API_KEY`
-- `OPENROUTER_MODEL`（可选，不填则走默认模型）
-- `OPENAI_API_KEY`（可选）
-- `SERPAPI_API_KEY`（可选）
-- `PRODUCTHUNT_API_TOKEN`（可选）
-- `SMTP_HOST`
-- `SMTP_PORT`
-- `SMTP_USER`
-- `SMTP_PASS`
-- `EMAIL_FROM`
-- `EMAIL_TO`
-
-配置好以后：
-- GitHub 会按 UTC 定时触发
-- 当前工作流里 `0 0 * * *` 对应北京时间每天早上 `08:00`
-- 也可以在 `Actions` 页面手动点 `Run workflow` 立即测试一次
-
-### 方式 3：自托管常驻调度器
+### 方式 2：自托管常驻调度器
 如果你自己用服务器或本机守护进程，可以运行内置 scheduler：
 ```bash
 pnpm scheduler
@@ -149,9 +122,6 @@ pnpm scheduler
 
 ### 部署选项
 ```bash
-# GitHub Actions
-# 直接提交仓库并配置 GitHub Actions secrets，无需本地常驻进程
-
 # 使用 PM2 管理常驻调度器
 pm2 start "pnpm scheduler" --name daily-agent-scheduler
 

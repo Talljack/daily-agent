@@ -64,34 +64,10 @@ app/page.tsx         -> 前端页面，展示 AI 摘要与分来源资讯
   - **非 200**: 返回 `{ "error": "message" }`
 
 ## 定时执行
-推荐优先使用 GitHub Actions、Codex App Automations 或系统 crontab 调用一次性脚本：
+推荐优先使用 Codex App Automations 或系统 crontab 调用一次性脚本：
 ```bash
 cd /Users/yugangcao/apps/my-apps/daily-agent && pnpm cron
 ```
-
-### GitHub Actions
-仓库已包含工作流：
-```bash
-.github/workflows/daily-email.yml
-```
-
-特点：
-- 每天 `08:00 Asia/Shanghai` 自动执行
-- 不需要你本地常驻脚本
-- 通过 GitHub Actions secrets 注入 API Key 和 SMTP 配置
-
-需要在仓库 `Settings -> Secrets and variables -> Actions` 中配置：
-- `OPENROUTER_API_KEY`
-- `OPENROUTER_MODEL`（可选）
-- `OPENAI_API_KEY`（可选）
-- `SERPAPI_API_KEY`（可选）
-- `PRODUCTHUNT_API_TOKEN`（可选）
-- `SMTP_HOST`
-- `SMTP_PORT`
-- `SMTP_USER`
-- `SMTP_PASS`
-- `EMAIL_FROM`
-- `EMAIL_TO`
 
 如果需要常驻进程，再使用 `scripts/scheduler.ts`：
 ```bash
