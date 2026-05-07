@@ -174,7 +174,7 @@ export async function fetchEleduckRemoteJobs(limit = 6): Promise<RemoteJobItem[]
       return {
         title,
         link: item.link ?? "",
-        content,
+        content: `${content} 电鸭详情页当前可能需要验证，以下信息优先基于 RSS 摘要，联系方式/完整要求需打开原帖确认。`,
       };
     })
     .filter((item) => item.link && looksLikeRemoteDevJob(item.title, item.content))

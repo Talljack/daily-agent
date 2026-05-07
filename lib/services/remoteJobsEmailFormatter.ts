@@ -81,7 +81,7 @@ function extractCompany(title: string, summary: string, sourceId: string) {
   }
 
   if (sourceId === "v2ex-remote" && /CH 传媒|传媒|科技|Studio|Labs|团队|公司/.test(summary)) {
-    const companyMatch = summary.match(/([A-Za-z0-9\u4e00-\u9fa5·&(). -]{2,30}(传媒|科技|Studio|Labs|团队|公司))/);
+    const companyMatch = summary.match(/([A-Za-z0-9\u4e00-\u9fa5·&(). -]{2,40}(传媒|科技|Studio|Labs|团队|公司))/);
     if (companyMatch) {
       return {
         roleTitle: normalizedTitle,
@@ -99,6 +99,9 @@ function extractCompany(title: string, summary: string, sourceId: string) {
 function extractRemoteScope(text: string, sourceId: string) {
   if (/全球远程|worldwide|global remote|work from anywhere/i.test(text)) {
     return "全球远程办公（原帖显示）";
+  }
+  if (/remote（标题明确）|标题明确 remote|标题明确远程/i.test(text)) {
+    return "远程办公（标题明确）";
   }
   if (/国内远程|remote cn|中国时区/i.test(text)) {
     return "国内远程 / 中国时区友好（以原帖为准）";
@@ -139,6 +142,9 @@ function extractEnglishRequirement(text: string, sourceId: string) {
     return "需要较强英文沟通";
   }
   if (/英语|英文|english/i.test(text)) {
+    return "需要基础英文读写";
+  }
+  if (/全球远程|worldwide|global remote/i.test(text) && !DOMESTIC_SOURCE_IDS.has(sourceId)) {
     return "需要基础英文读写";
   }
   return DOMESTIC_SOURCE_IDS.has(sourceId)
@@ -210,7 +216,7 @@ function buildRisks(sourceId: string, company: string, text: string) {
     risks.push("公司信息披露有限");
   }
   if (sourceId === "eleduck") {
-    risks.push("电鸭详情页可能触发验证，联系方式和完整要求需打开原帖确认");
+    risks.push("电鸭详情页当前可能需验证，以下信息主要基于 RSS 摘要，联系方式和完整要求需打开原帖确认");
   }
   if (!/english|英文|英语/i.test(text) && !DOMESTIC_SOURCE_IDS.has(sourceId)) {
     risks.push("海外岗位默认存在语言与协作门槛");
@@ -237,7 +243,7 @@ function buildSuggestedAction(sourceId: string, link: string, text: string) {
     return "优先打开 V2EX 原帖确认联系方式、远程方式和技术要求，再按匹配技术栈定制简历";
   }
   if (sourceId === "eleduck") {
-    return "先打开电鸭原帖确认联系方式与远程细节；若详情页受限，可基于摘要做保守跟进";
+    return "先打开电鸭原帖确认联系方式与远程细节；若详情页受限，可基于 RSS 摘要做保守跟进";
   }
   if (/remoteok|remotive|we work remotely/i.test(sourceId)) {
     return `先确认岗位是否接受全球远程 / 中国时区，再从原帖或公司官网完成投递：${link}`;
