@@ -12,6 +12,27 @@ export const DEFAULT_ITEMS_PER_SOURCE = 5;
 
 export const RSS_SOURCES: RssSource[] = [
   {
+    id: "remote",
+    title: "RemoteOK 远程职位",
+    url: "https://remoteok.io/remote-jobs.rss",
+    description: "最新远程工作机会",
+    limit: 4,
+  },
+  {
+    id: "remotive",
+    title: "Remotive 远程职位",
+    url: "https://remotive.com/remote-jobs/feed",
+    description: "远程优先公司的最新岗位",
+    limit: 4,
+  },
+  {
+    id: "weworkremotely",
+    title: "We Work Remotely",
+    url: "https://weworkremotely.com/remote-jobs.rss",
+    description: "全球分布式团队招聘信息",
+    limit: 4,
+  },
+  {
     id: "tech",
     title: "Hacker News",
     url: "https://hnrss.org/frontpage",
@@ -33,27 +54,6 @@ export const RSS_SOURCES: RssSource[] = [
     url: "https://dev.to/feed",
     description: "开发者社区热门文章",
     limit: 6,
-  },
-  {
-    id: "remote",
-    title: "RemoteOK 远程职位",
-    url: "https://remoteok.io/remote-jobs.rss",
-    description: "最新远程工作机会",
-    limit: 4,
-  },
-  {
-    id: "remotive",
-    title: "Remotive 远程职位",
-    url: "https://remotive.com/remote-jobs/feed",
-    description: "远程优先公司的最新岗位",
-    limit: 4,
-  },
-  {
-    id: "weworkremotely",
-    title: "We Work Remotely",
-    url: "https://weworkremotely.com/remote-jobs.rss",
-    description: "全球分布式团队招聘信息",
-    limit: 4,
   },
   {
     id: "reddit",

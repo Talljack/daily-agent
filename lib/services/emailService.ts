@@ -2,6 +2,8 @@ import nodemailer from 'nodemailer';
 import type { DailyReport } from './dailyReport';
 import { hasEmailConfig, SMTP_HOST, SMTP_PORT, SMTP_USER, SMTP_PASS, EMAIL_FROM, EMAIL_TO } from '@/lib/env';
 
+const REMOTE_SOURCE_IDS = new Set(["remote", "remotive", "weworkremotely"]);
+
 export interface EmailConfig {
   host: string;
   port: number;
@@ -48,6 +50,13 @@ export class EmailService {
     return new EmailService(config);
   }
 
+  private splitSources(report: DailyReport) {
+    const remoteSources = report.sources.filter((source) => REMOTE_SOURCE_IDS.has(source.id) && source.items.length > 0);
+    const otherSources = report.sources.filter((source) => !REMOTE_SOURCE_IDS.has(source.id) && source.items.length > 0);
+
+    return { remoteSources, otherSources };
+  }
+
   private generateEmailHtml(report: DailyReport): string {
     const date = new Date(report.generatedAt).toLocaleDateString('zh-CN', {
       year: 'numeric',
@@ -56,8 +65,13 @@ export class EmailService {
       weekday: 'long'
     });
 
+    const { remoteSources, otherSources } = this.splitSources(report);
+    const remoteItems = remoteSources.flatMap((source) =>
+      source.items.map((item) => ({ ...item, sourceTitle: source.title }))
+    );
+
     let sourcesHtml = '';
-    report.sources.forEach(source => {
+    otherSources.forEach(source => {
       if (source.items.length > 0) {
         sourcesHtml += `
           <div style="margin-bottom: 30px;">
@@ -82,6 +96,33 @@ export class EmailService {
       }
     });
 
+    const preheader = "今日远程岗位优先送达，附带科技动态与开发者资讯摘要。";
+    const remoteHtml = remoteItems.length > 0
+      ? `
+        <div style="margin-bottom: 32px; padding: 24px; background: #fff7ed; border: 1px solid #fdba74; border-radius: 16px;">
+          <h2 style="margin: 0 0 8px 0; color: #9a3412; font-size: 24px;">💼 今日远程岗位</h2>
+          <p style="margin: 0 0 18px 0; color: #7c2d12; line-height: 1.6;">
+            优先展示本次抓取到的远程岗位，方便你先看值得投递的机会。
+          </p>
+          <ul style="list-style: none; padding: 0; margin: 0;">
+            ${remoteItems.map((item, index) => `
+              <li style="margin-bottom: 14px; padding: 16px; background: #ffffff; border-radius: 12px; border: 1px solid #fed7aa;">
+                <div style="margin-bottom: 8px; color: #c2410c; font-size: 13px; font-weight: 700;">
+                  ${index + 1}. ${item.sourceTitle}
+                </div>
+                <h3 style="margin: 0 0 8px 0; font-size: 17px; line-height: 1.5;">
+                  <a href="${item.link}" style="color: #111827; text-decoration: none;" target="_blank">
+                    ${item.title}
+                  </a>
+                </h3>
+                ${item.summary ? `<p style="margin: 0; color: #7c2d12; line-height: 1.6;">${item.summary}</p>` : ''}
+              </li>
+            `).join('')}
+          </ul>
+        </div>
+      `
+      : "";
+
     return `
       <!DOCTYPE html>
       <html lang="zh-CN">
@@ -91,14 +132,19 @@ export class EmailService {
         <title>Daily Agent - ${date}</title>
       </head>
       <body style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; line-height: 1.6; color: #374151; background-color: #ffffff; margin: 0; padding: 0;">
+        <div style="display: none; max-height: 0; overflow: hidden; opacity: 0; mso-hide: all;">
+          ${preheader}
+        </div>
         <div style="max-width: 800px; margin: 0 auto; padding: 20px;">
-          <header style="text-align: center; margin-bottom: 40px; padding: 30px 0; background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); border-radius: 12px; color: white;">
+          <header style="text-align: center; margin-bottom: 32px; padding: 30px 0; background: linear-gradient(135deg, #2563eb 0%, #7c3aed 100%); border-radius: 20px; color: white;">
             <h1 style="margin: 0; font-size: 28px; font-weight: 700;">🤖 Daily Agent</h1>
-            <p style="margin: 10px 0 0 0; font-size: 16px; opacity: 0.9;">AI驱动的科技日报 - ${date}</p>
+            <p style="margin: 10px 0 0 0; font-size: 16px; opacity: 0.92;">远程岗位优先日报 - ${date}</p>
           </header>
 
-          <div style="margin-bottom: 40px; padding: 25px; background: #f0f9ff; border-radius: 12px; border: 1px solid #bae6fd;">
-            <h2 style="margin: 0 0 15px 0; color: #0c4a6e; font-size: 20px;">🤖 Grok AI 摘要</h2>
+          ${remoteHtml}
+
+          <div style="margin-bottom: 32px; padding: 24px; background: #eff6ff; border-radius: 16px; border: 1px solid #bfdbfe;">
+            <h2 style="margin: 0 0 15px 0; color: #1d4ed8; font-size: 22px;">🤖 AI 摘要</h2>
             <div style="white-space: pre-line; line-height: 1.7; color: #1e293b;">
               ${report.summary}
             </div>
@@ -110,7 +156,7 @@ export class EmailService {
 
           <footer style="text-align: center; margin-top: 50px; padding-top: 20px; border-top: 1px solid #e5e7eb; color: #6b7280; font-size: 14px;">
             <p>🤖 由 Daily Agent 自动生成并发送</p>
-            <p>⚡ Powered by Grok AI & Next.js</p>
+            <p>⚡ Powered by OpenRouter & Next.js</p>
           </footer>
         </div>
       </body>
@@ -120,9 +166,13 @@ export class EmailService {
 
   private generateEmailText(report: DailyReport): string {
     const date = new Date(report.generatedAt).toLocaleDateString('zh-CN');
+    const { remoteSources, otherSources } = this.splitSources(report);
+    const remoteItems = remoteSources.flatMap((source) =>
+      source.items.map((item) => ({ ...item, sourceTitle: source.title }))
+    );
 
     let sourcesText = '';
-    report.sources.forEach(source => {
+    otherSources.forEach(source => {
       if (source.items.length > 0) {
         sourcesText += `\n\n## ${source.title}\n`;
         if (source.description) {
@@ -139,23 +189,39 @@ export class EmailService {
       }
     });
 
-    return `
-Daily Agent - ${date}
+    let remoteText = '';
+    if (remoteItems.length > 0) {
+      remoteText += '## 今日远程岗位\n\n';
+      remoteItems.forEach((item, index) => {
+        remoteText += `${index + 1}. ${item.title}\n`;
+        remoteText += `   来源: ${item.sourceTitle}\n`;
+        remoteText += `   链接: ${item.link}\n`;
+        if (item.summary) {
+          remoteText += `   摘要: ${item.summary}\n`;
+        }
+        remoteText += '\n';
+      });
+    }
 
-Grok AI 摘要:
+    return `
+Daily Agent 远程岗位优先日报 - ${date}
+
+${remoteText}
+
+AI 摘要:
 ${report.summary}
 
 详细资讯:${sourcesText}
 
 ---
 由 Daily Agent 自动生成并发送
-⚡ Powered by Grok AI & Next.js
+⚡ Powered by OpenRouter & Next.js
     `.trim();
   }
 
   async sendDailyReport(report: DailyReport): Promise<void> {
     const date = new Date(report.generatedAt).toLocaleDateString('zh-CN');
-    const subject = `🤖 Daily Agent 科技日报 - ${date}`;
+    const subject = `💼 Daily Agent 远程岗位日报 - ${date}`;
 
     const mailOptions = {
       from: this.config.from,

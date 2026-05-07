@@ -4,6 +4,8 @@ import { fetchRSS, RSSItem } from "@/lib/tools/rssTool";
 import { fetchDynamicCategoryInsights } from "@/lib/services/discoveryAggregator";
 import { hasAIConfig } from "@/lib/env";
 
+const REMOTE_SOURCE_IDS = new Set(["remote", "remotive", "weworkremotely"]);
+
 export type DailySourceItem = {
   title: string;
   link: string;
@@ -25,6 +27,16 @@ export type DailyReport = {
   rawContent: string;
   sources: DailySourceResult[];
 };
+
+function sortSources(results: DailySourceResult[]) {
+  return [...results].sort((a, b) => {
+    const aIsRemote = REMOTE_SOURCE_IDS.has(a.id);
+    const bIsRemote = REMOTE_SOURCE_IDS.has(b.id);
+
+    if (aIsRemote === bIsRemote) return 0;
+    return aIsRemote ? -1 : 1;
+  });
+}
 
 async function loadRssItems(sourceUrl: string, limit?: number): Promise<RSSItem[]> {
   try {
@@ -127,7 +139,9 @@ export async function buildDailyReport(): Promise<DailyReport> {
     })
   );
 
-  const sections = results
+  const orderedResults = sortSources(results);
+
+  const sections = orderedResults
     .filter(result => result.items.length > 0)
     .map(result => {
       const lines = result.items.map((item, index) => `${index + 1}. ${item.title} - ${item.summary}`);
@@ -147,17 +161,17 @@ export async function buildDailyReport(): Promise<DailyReport> {
     } catch (error) {
       const message = error instanceof Error ? error.message : "未知错误";
       console.error('❌ AI摘要生成失败:', error);
-      summary = `生成摘要失败：${message}\n\n请检查API配置或稍后重试。`;
+      summary = `今日远程岗位与科技摘要暂时生成失败。已保留原始抓取结果，可直接查看下方岗位与资讯明细。\n\n错误信息：${message}`;
     }
   } else if (rawContent.trim().length > 0 && !hasApiConfig) {
-    summary = "未配置 AI API 密钥，无法生成智能摘要。\n\n请在 .env.local 中配置 OPENROUTER_API_KEY 或 OPENAI_API_KEY。";
+    summary = "未配置 AI API 密钥，无法生成摘要。已保留原始抓取结果，可直接查看下方岗位与资讯明细。";
   }
 
   const report = {
     generatedAt: new Date().toISOString(),
     summary,
     rawContent,
-    sources: results,
+    sources: orderedResults,
   };
 
   console.log('📊 日报构建完成');
