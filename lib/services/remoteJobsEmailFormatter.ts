@@ -19,6 +19,7 @@ type StructuredRemoteJob = {
   sourceLabel: string;
   sourceId: string;
   link: string;
+  contactEmail?: string;
   priority: RemoteJobPriority;
   group: RemoteJobGroup;
   remoteScope: string;
@@ -32,6 +33,75 @@ type StructuredRemoteJob = {
 };
 
 const DOMESTIC_SOURCE_IDS = new Set(["v2ex-remote", "eleduck"]);
+const SOURCE_PRIORITY: Record<string, number> = {
+  "v2ex-remote": 5,
+  eleduck: 4,
+  remotive: 3,
+  weworkremotely: 2,
+  remote: 1,
+};
+
+const POSITIVE_ROLE_KEYWORDS = [
+  "engineer",
+  "developer",
+  "backend",
+  "frontend",
+  "full-stack",
+  "full stack",
+  "devops",
+  "sre",
+  "architect",
+  "qa",
+  "golang",
+  "python",
+  "react",
+  "flutter",
+  "rust",
+  "agent",
+  "llm",
+  "mcp",
+  "开发",
+  "工程师",
+  "前端",
+  "后端",
+  "全栈",
+  "架构师",
+  "测试",
+  "运维",
+];
+
+const NEGATIVE_ROLE_KEYWORDS = [
+  "财务",
+  "产品经理",
+  "项目经理",
+  "运营",
+  "商务",
+  "销售",
+  "市场",
+  "seo",
+  "增长",
+  "讲师",
+  "instructor",
+  "client services",
+  "business development",
+  "conversion rate optimization",
+  "director of conversion",
+  "用户举报",
+  "求合作",
+  "求带",
+  "求职",
+  "寻求远程兼职合作",
+  "customer support",
+  "customer service",
+  "support manager",
+  "writer",
+  "writing",
+  "copywriter",
+  "marketing",
+  "growth marketing",
+  "合作",
+  "导师",
+];
 
 const TECH_KEYWORDS: Array<{ label: string; keywords: string[] }> = [
   { label: "AI/Agent 工程", keywords: ["agent", "ai", "llm", "rag", "mcp", "workflow"] },
@@ -48,6 +118,17 @@ function normalize(text: string) {
   return ` ${text.toLowerCase()} `;
 }
 
+function keywordExists(text: string, keyword: string) {
+  const lowerText = text.toLowerCase();
+  const lowerKeyword = keyword.toLowerCase();
+
+  if (/[\u4e00-\u9fa5]/.test(lowerKeyword) || /[.\-\/\s]/.test(lowerKeyword)) {
+    return lowerText.includes(lowerKeyword);
+  }
+
+  return new RegExp(`(^|[^a-z0-9])${lowerKeyword}([^a-z0-9]|$)`, "i").test(lowerText);
+}
+
 function sanitizeLink(link: string) {
   return link.replace(/#.*$/, "");
 }
@@ -59,6 +140,28 @@ function unique<T>(items: T[]) {
 function extractEmail(text: string) {
   const match = text.match(/[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}/i);
   return match?.[0];
+}
+
+function pickBestRoleFromSummary(summary: string) {
+  const preferredSnippets = [
+    "python 全栈开发工程师",
+    "go 开发工程师",
+    "高级 go 开发工程师",
+    "高级前端架构师",
+    "flutter 开发工程师",
+    "高级 web sdk 开发工程师",
+    "c++后端开发工程师",
+    "ai 爬虫工程师",
+  ];
+
+  const lowerSummary = summary.toLowerCase();
+  for (const snippet of preferredSnippets) {
+    if (lowerSummary.includes(snippet)) {
+      return `${snippet.replace(/\b\w/g, (char) => char.toUpperCase())}（多岗位）`;
+    }
+  }
+
+  return null;
 }
 
 function extractCompany(title: string, summary: string, sourceId: string) {
@@ -83,8 +186,9 @@ function extractCompany(title: string, summary: string, sourceId: string) {
   if (sourceId === "v2ex-remote" && /CH 传媒|传媒|科技|Studio|Labs|团队|公司/.test(summary)) {
     const companyMatch = summary.match(/([A-Za-z0-9\u4e00-\u9fa5·&(). -]{2,40}(传媒|科技|Studio|Labs|团队|公司))/);
     if (companyMatch) {
+      const betterRole = pickBestRoleFromSummary(summary);
       return {
-        roleTitle: normalizedTitle,
+        roleTitle: betterRole ?? normalizedTitle,
         company: companyMatch[1].trim(),
       };
     }
@@ -153,29 +257,42 @@ function extractEnglishRequirement(text: string, sourceId: string) {
 }
 
 function extractTechMatch(text: string) {
-  const normalized = normalize(text);
   const labels = TECH_KEYWORDS
-    .filter((entry) => entry.keywords.some((keyword) => normalized.includes(keyword)))
+    .filter((entry) => entry.keywords.some((keyword) => keywordExists(text, keyword)))
     .map((entry) => entry.label);
 
   return labels.length > 0 ? unique(labels).slice(0, 4).join("、") : "原帖提及远程开发相关职责，建议打开链接确认具体技术栈";
 }
 
 function calculateScore(text: string, sourceId: string) {
-  const normalized = normalize(text);
   let score = DOMESTIC_SOURCE_IDS.has(sourceId) ? 4 : 2;
 
-  if (/agent|llm|rag|mcp|ai/i.test(normalized)) score += 3;
-  if (/react|typescript|frontend|前端/i.test(normalized)) score += 2;
-  if (/python|fastapi|golang|node|full stack|全栈/i.test(normalized)) score += 2;
-  if (/global remote|worldwide|全球远程|remote/i.test(normalized)) score += 1;
-  if (/senior|高级|lead|staff/i.test(normalized)) score += 1;
+  if (["agent", "llm", "rag", "mcp", "ai", "智能体"].some((keyword) => keywordExists(text, keyword))) score += 3;
+  if (["react", "typescript", "frontend", "前端"].some((keyword) => keywordExists(text, keyword))) score += 2;
+  if (["python", "fastapi", "golang", "node", "full stack", "全栈", "后端"].some((keyword) => keywordExists(text, keyword))) score += 2;
+  if (["global remote", "worldwide", "全球远程", "remote", "远程"].some((keyword) => keywordExists(text, keyword))) score += 1;
+  if (["senior", "高级", "lead", "staff"].some((keyword) => keywordExists(text, keyword))) score += 1;
 
-  if (/兼职|part-time/i.test(normalized)) score -= 1;
-  if (/运营|seo|销售|市场|product manager|产品经理/i.test(normalized)) score -= 2;
-  if (/intern|实习|junior|初级/i.test(normalized)) score -= 1;
+  if (["兼职", "part-time"].some((keyword) => keywordExists(text, keyword))) score -= 1;
+  if (NEGATIVE_ROLE_KEYWORDS.some((keyword) => keywordExists(text, keyword))) score -= 3;
+  if (["intern", "实习", "junior", "初级"].some((keyword) => keywordExists(text, keyword))) score -= 1;
 
   return score;
+}
+
+function isTargetJob(title: string, text: string) {
+  const positiveHits = POSITIVE_ROLE_KEYWORDS.filter((keyword) => keywordExists(title, keyword) || keywordExists(text, keyword));
+  const negativeHits = NEGATIVE_ROLE_KEYWORDS.filter((keyword) => keywordExists(title, keyword) || keywordExists(text, keyword));
+
+  if (negativeHits.length > 0) {
+    return false;
+  }
+
+  if (positiveHits.length === 0) {
+    return false;
+  }
+
+  return true;
 }
 
 function determineGroup(score: number, sourceId: string, text: string): RemoteJobGroup {
@@ -184,7 +301,7 @@ function determineGroup(score: number, sourceId: string, text: string): RemoteJo
   }
 
   const hasClearRemote = /全球远程|远程办公|remote/i.test(text);
-  const hasStrongFit = /agent|ai|react|typescript|python|fastapi|golang|node|全栈/i.test(text);
+  const hasStrongFit = ["agent", "ai", "react", "typescript", "python", "fastapi", "golang", "node", "全栈"].some((keyword) => keywordExists(text, keyword));
   return hasClearRemote && hasStrongFit && score >= 6 ? "domestic_direct" : "domestic_confirm";
 }
 
@@ -221,7 +338,7 @@ function buildRisks(sourceId: string, company: string, text: string) {
   if (!/english|英文|英语/i.test(text) && !DOMESTIC_SOURCE_IDS.has(sourceId)) {
     risks.push("海外岗位默认存在语言与协作门槛");
   }
-  if (/兼职|part-time/i.test(text)) {
+  if (["兼职", "part-time"].some((keyword) => keywordExists(text, keyword))) {
     risks.push("岗位可能偏兼职或非全职");
   }
   if (/europe|eu only|us only|north america/i.test(text)) {
@@ -258,12 +375,13 @@ function sourceLabel(result: RemoteSourceResult) {
 }
 
 function toStructuredJobs(results: RemoteSourceResult[]) {
-  return results
+  const jobs = results
     .flatMap((result) =>
       result.items.map((item) => {
         const link = sanitizeLink(item.link);
         const source = sourceLabel(result);
         const text = `${item.title}\n${item.summary}`;
+        const contactEmail = extractEmail(text);
         const { roleTitle, company } = extractCompany(item.title, item.summary, result.id);
         const remoteScope = extractRemoteScope(text, result.id);
         const timezoneRequirement = extractTimezone(text, result.id);
@@ -279,6 +397,7 @@ function toStructuredJobs(results: RemoteSourceResult[]) {
           sourceLabel: source,
           sourceId: result.id,
           link,
+          contactEmail,
           priority,
           group,
           remoteScope,
@@ -292,8 +411,34 @@ function toStructuredJobs(results: RemoteSourceResult[]) {
         } satisfies StructuredRemoteJob;
       }),
     )
+    .filter((job) => isTargetJob(job.title, `${job.title}\n${job.techMatch}\n${job.fitReason}\n${job.risks}`))
     .filter((job, index, jobs) => jobs.findIndex((candidate) => candidate.link === job.link) === index)
-    .sort((a, b) => b.score - a.score);
+    .sort((a, b) => (b.score + (SOURCE_PRIORITY[b.sourceId] ?? 0)) - (a.score + (SOURCE_PRIORITY[a.sourceId] ?? 0)));
+
+  const deduped = jobs.filter((job, index, allJobs) => {
+    if (!job.contactEmail || job.company === "未公开") {
+      return true;
+    }
+
+    const firstIndex = allJobs.findIndex(
+      (candidate) =>
+        candidate.contactEmail === job.contactEmail &&
+        candidate.company === job.company &&
+        candidate.sourceId === job.sourceId,
+    );
+
+    return firstIndex === index;
+  });
+
+  return deduped.filter((job, index, allJobs) => {
+    const titleKey = job.title.replace(/（多岗位）/g, "").replace(/\s+/g, "").toLowerCase();
+    const firstIndex = allJobs.findIndex(
+      (candidate) =>
+        candidate.title.replace(/（多岗位）/g, "").replace(/\s+/g, "").toLowerCase() === titleKey &&
+        candidate.company === job.company,
+    );
+    return firstIndex === index;
+  });
 }
 
 function renderGroup(title: string, jobs: StructuredRemoteJob[]) {
@@ -320,17 +465,18 @@ export function buildRemoteJobsEmailContent(results: RemoteSourceResult[], gener
   const domesticDirect = jobs.filter((job) => job.group === "domestic_direct").slice(0, 6);
   const domesticConfirm = jobs.filter((job) => job.group === "domestic_confirm").slice(0, 6);
   const overseas = jobs.filter((job) => job.group === "overseas").slice(0, 6);
+  const displayedJobs = [...domesticDirect, ...domesticConfirm, ...overseas];
   const date = new Date(generatedAt).toLocaleDateString("zh-CN").replace(/\//g, "-");
 
   const lines: string[] = [];
-  lines.push(`今天找到 ${jobs.length} 个值得投递的岗位。`);
+  lines.push(`今天找到 ${displayedJobs.length} 个值得投递的岗位。`);
   lines.push("说明：已优先保留国内远程开发岗，并将海外远程岗位作为高匹配补充；具体联系方式、时区和用工方式请在投递前逐条核验。");
   lines.push(renderGroup("国内高优先级可直接投", domesticDirect));
   lines.push(renderGroup("国内可投但需确认条件", domesticConfirm));
   lines.push(renderGroup("海外高匹配补充岗位", overseas));
   lines.push("");
   lines.push("## 今日推荐投递顺序");
-  jobs.slice(0, 6).forEach((job, index) => {
+  displayedJobs.slice(0, 6).forEach((job, index) => {
     lines.push(`${index + 1}. ${job.sourceLabel} - ${job.title}`);
   });
   lines.push("");
